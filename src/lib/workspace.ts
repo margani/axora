@@ -1,4 +1,4 @@
-import type { Client, Invoice, InvoiceItem, InvoiceTemplate, Timesheet, TimesheetEntry, Workspace } from './types';
+import type { Client, Currency, Invoice, InvoiceItem, InvoiceTemplate, Timesheet, TimesheetEntry, TimesheetEntryMode, Workspace } from './types';
 
 export const STORAGE_KEY = 'axora.workspace.v1';
 export const SAVED_AT_KEY = 'axora.savedAt';
@@ -17,8 +17,21 @@ export function addDays(date: string, days: number) {
   return next.toISOString().slice(0, 10);
 }
 
+export function clientDefaults(client: Client | undefined, workspace: Workspace) {
+  return {
+    hourlyRate: Number(client?.defaultHourlyRate || 500),
+    currency: client?.defaultCurrency || workspace.settings.currency || 'GBP',
+    paymentTermsDays: Number(client?.defaultPaymentTermsDays || workspace.profile.paymentTermsDays || 14),
+    invoiceTemplate: client?.defaultInvoiceTemplate || workspace.settings.invoiceTemplate || 'classic'
+  };
+}
+
 export function monthName(month: number) {
   return new Date(2026, month - 1, 1).toLocaleString('en-GB', { month: 'long' });
+}
+
+export function nextMonth(month: number, year: number) {
+  return month >= 12 ? { month: 1, year: year + 1 } : { month: month + 1, year };
 }
 
 export function emptyClient(): Client {
@@ -30,11 +43,15 @@ export function emptyClient(): Client {
     email: '',
     phone: '',
     companyNumber: '',
-    vatNumber: ''
+    vatNumber: '',
+    defaultHourlyRate: 500,
+    defaultCurrency: 'GBP',
+    defaultPaymentTermsDays: 14,
+    defaultInvoiceTemplate: 'classic'
   };
 }
 
-export function emptyTimesheet(clientId = '', currency = 'GBP'): Timesheet {
+export function emptyTimesheet(clientId = '', currency: Currency = 'GBP', hourlyRate = 500): Timesheet {
   const now = new Date();
   return {
     id: uid('timesheet'),
@@ -42,8 +59,11 @@ export function emptyTimesheet(clientId = '', currency = 'GBP'): Timesheet {
     clientId,
     month: now.getMonth() + 1,
     year: now.getFullYear(),
-    hourlyRate: 500,
+    hourlyRate,
     currency,
+    entryMode: 'simple',
+    archived: false,
+    lastPdfGeneratedAt: '',
     entries: [emptyTimesheetEntry()]
   };
 }
@@ -52,6 +72,7 @@ export function emptyTimesheetEntry(): TimesheetEntry {
   return {
     id: uid('entry'),
     date: todayIso(),
+    hours: 0,
     startTime: '09:00',
     endTime: '17:30',
     breakMinutes: 30,
@@ -72,7 +93,9 @@ export function emptyInvoice(clientId = '', currency = 'GBP', template: InvoiceT
     currency,
     template,
     items: [emptyInvoiceItem()],
-    notes: 'Payment by bank transfer. Thank you.'
+    notes: 'Payment by bank transfer. Thank you.',
+    archived: false,
+    lastPdfGeneratedAt: ''
   };
 }
 
@@ -90,7 +113,7 @@ export function sampleWorkspace(): Workspace {
   const timesheetId = uid('timesheet');
   const invoiceId = uid('invoice');
   return {
-    version: 1,
+    version: 2,
     profile: {
       companyName: 'Northstar Contracting Ltd',
       contactName: 'Alex Morgan',
@@ -115,7 +138,11 @@ export function sampleWorkspace(): Workspace {
         email: 'sam@example-client.test',
         phone: '+44 117 000 0000',
         companyNumber: '87654321',
-        vatNumber: 'GB987654321'
+        vatNumber: 'GB987654321',
+        defaultHourlyRate: 500,
+        defaultCurrency: 'GBP',
+        defaultPaymentTermsDays: 14,
+        defaultInvoiceTemplate: 'modern'
       }
     ],
     timesheets: [
@@ -127,10 +154,14 @@ export function sampleWorkspace(): Workspace {
         year: 2026,
         hourlyRate: 500,
         currency: 'GBP',
+        entryMode: 'simple',
+        archived: false,
+        lastPdfGeneratedAt: '',
         entries: [
           {
             id: uid('entry'),
             date: '2026-06-03',
+            hours: 8,
             startTime: '09:00',
             endTime: '17:30',
             breakMinutes: 30,
@@ -140,6 +171,7 @@ export function sampleWorkspace(): Workspace {
           {
             id: uid('entry'),
             date: '2026-06-04',
+            hours: 7,
             startTime: '09:15',
             endTime: '16:45',
             breakMinutes: 30,
@@ -149,6 +181,7 @@ export function sampleWorkspace(): Workspace {
           {
             id: uid('entry'),
             date: '2026-06-05',
+            hours: 2,
             startTime: '10:00',
             endTime: '12:00',
             breakMinutes: 0,
@@ -176,12 +209,15 @@ export function sampleWorkspace(): Workspace {
             unitPrice: 500
           }
         ],
-        notes: 'Payment by bank transfer. Please include the invoice number as reference.'
+        notes: 'Payment by bank transfer. Please include the invoice number as reference.',
+        archived: false,
+        lastPdfGeneratedAt: ''
       }
     ],
     settings: {
       currency: 'GBP',
-      invoiceTemplate: 'classic'
+      invoiceTemplate: 'classic',
+      companyLogo: ''
     }
   };
 }
@@ -195,7 +231,7 @@ export function loadWorkspace(): { workspace: Workspace; savedAt: string } {
 
 export function saveWorkspace(workspace: Workspace) {
   const savedAt = new Date().toISOString();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...workspace, version: 2 }));
   localStorage.setItem(SAVED_AT_KEY, savedAt);
   return savedAt;
 }
@@ -207,18 +243,64 @@ export function clearWorkspace() {
 
 export function normalizeWorkspace(value: unknown): Workspace {
   if (!value || typeof value !== 'object') throw new Error('Workspace file is not valid JSON data.');
-  const source = value as Partial<Workspace>;
-  if (source.version !== 1) throw new Error('Only workspace version 1 is supported.');
+  const source = value as Partial<Workspace> & { version?: number };
+  if (source.version && source.version > 2) throw new Error('This workspace was created by a newer version of Axora.');
+  if (source.version && source.version < 1) throw new Error('Workspace version is not supported.');
+  const sample = sampleWorkspace();
   return {
-    version: 1,
-    profile: { ...sampleWorkspace().profile, ...(source.profile ?? {}) },
-    clients: Array.isArray(source.clients) ? source.clients : [],
-    timesheets: Array.isArray(source.timesheets) ? source.timesheets : [],
-    invoices: Array.isArray(source.invoices) ? source.invoices : [],
+    version: 2,
+    profile: { ...sample.profile, ...(source.profile ?? {}) },
+    clients: Array.isArray(source.clients) ? source.clients.map(normalizeClient) : [],
+    timesheets: Array.isArray(source.timesheets) ? source.timesheets.map(normalizeTimesheet) : [],
+    invoices: Array.isArray(source.invoices) ? source.invoices.map(normalizeInvoice) : [],
     settings: {
       currency: source.settings?.currency ?? 'GBP',
-      invoiceTemplate: source.settings?.invoiceTemplate ?? 'classic'
+      invoiceTemplate: source.settings?.invoiceTemplate ?? 'classic',
+      companyLogo: source.settings?.companyLogo ?? ''
     }
+  };
+}
+
+function normalizeClient(client: Partial<Client>): Client {
+  return {
+    ...emptyClient(),
+    ...client,
+    defaultHourlyRate: Number(client.defaultHourlyRate || 500),
+    defaultCurrency: client.defaultCurrency || 'GBP',
+    defaultPaymentTermsDays: Number(client.defaultPaymentTermsDays || 14),
+    defaultInvoiceTemplate: client.defaultInvoiceTemplate || 'classic'
+  };
+}
+
+function normalizeTimesheet(timesheet: Partial<Timesheet>): Timesheet {
+  return {
+    ...emptyTimesheet(),
+    ...timesheet,
+    entryMode: timesheet.entryMode === 'detailed' ? 'detailed' : 'simple',
+    archived: Boolean(timesheet.archived),
+    lastPdfGeneratedAt: timesheet.lastPdfGeneratedAt ?? '',
+    entries: Array.isArray(timesheet.entries) ? timesheet.entries.map(normalizeTimesheetEntry) : []
+  };
+}
+
+function normalizeTimesheetEntry(entry: Partial<TimesheetEntry>): TimesheetEntry {
+  return {
+    ...emptyTimesheetEntry(),
+    ...entry,
+    hours: Number(entry.hours || 0),
+    breakMinutes: Number(entry.breakMinutes || 0),
+    billable: entry.billable ?? true
+  };
+}
+
+function normalizeInvoice(invoice: Partial<Invoice>): Invoice {
+  return {
+    ...emptyInvoice(),
+    ...invoice,
+    template: invoice.template === 'modern' || invoice.template === 'compact' ? invoice.template : 'classic',
+    archived: Boolean(invoice.archived),
+    lastPdfGeneratedAt: invoice.lastPdfGeneratedAt ?? '',
+    items: Array.isArray(invoice.items) ? invoice.items : []
   };
 }
 
@@ -237,20 +319,30 @@ export function downloadBlob(blob: Blob, filename: string) {
 }
 
 export function duplicateTimesheet(timesheet: Timesheet): Timesheet {
+  const next = nextMonth(Number(timesheet.month || 1), Number(timesheet.year || new Date().getFullYear()));
   return {
     ...structuredClone(timesheet),
     id: uid('timesheet'),
-    title: `${timesheet.title} copy`,
-    entries: timesheet.entries.map((entry) => ({ ...entry, id: uid('entry') }))
+    title: `${monthName(next.month)} ${next.year} Timesheet`,
+    month: next.month,
+    year: next.year,
+    archived: false,
+    lastPdfGeneratedAt: '',
+    entries: [emptyTimesheetEntry()]
   };
 }
 
-export function duplicateInvoice(invoice: Invoice): Invoice {
+export function duplicateInvoice(invoice: Invoice, invoices: Invoice[], paymentTermsDays = 14): Invoice {
+  const issueDate = todayIso();
   return {
     ...structuredClone(invoice),
     id: uid('invoice'),
-    invoiceNumber: `${invoice.invoiceNumber}-COPY`,
+    invoiceNumber: nextInvoiceNumber(invoices),
+    issueDate,
+    dueDate: addDays(issueDate, paymentTermsDays),
     status: 'draft',
+    archived: false,
+    lastPdfGeneratedAt: '',
     items: invoice.items.map((item) => ({ ...item, id: uid('item') }))
   };
 }
@@ -275,11 +367,14 @@ export function invoiceFromTimesheet(timesheet: Timesheet, invoiceNumber: string
         unitPrice: timesheet.hourlyRate
       }
     ],
-    notes: 'Payment by bank transfer. Thank you.'
+    notes: 'Payment by bank transfer. Thank you.',
+    archived: false,
+    lastPdfGeneratedAt: ''
   };
 }
 
-export function entryMinutes(entry: TimesheetEntry) {
+export function entryMinutes(entry: TimesheetEntry, mode: TimesheetEntryMode = 'simple') {
+  if (mode === 'simple' && Number(entry.hours || 0) > 0) return Math.round(Number(entry.hours || 0) * 60);
   const [startHour, startMinute] = entry.startTime.split(':').map(Number);
   const [endHour, endMinute] = entry.endTime.split(':').map(Number);
   if ([startHour, startMinute, endHour, endMinute].some((part) => Number.isNaN(part))) return 0;
@@ -289,7 +384,7 @@ export function entryMinutes(entry: TimesheetEntry) {
 }
 
 export function billableMinutes(timesheet: Timesheet) {
-  return timesheet.entries.filter((entry) => entry.billable).reduce((sum, entry) => sum + entryMinutes(entry), 0);
+  return timesheet.entries.filter((entry) => entry.billable).reduce((sum, entry) => sum + entryMinutes(entry, timesheet.entryMode), 0);
 }
 
 export function timesheetTotal(timesheet: Timesheet) {
