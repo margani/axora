@@ -129,4 +129,4 @@ The workspace is intentionally simple and versioned:
 
 ## Privacy
 
-All data stays in the browser unless the user exports a workspace file. There is no backend, account system, authentication, analytics, cloud sync, or external SaaS storage.
+All data stays in the browser unless the user exports a workspace file. There is no backend, account system, authentication, analytics, cloud sync, or external SaaS storage..
