@@ -62,6 +62,7 @@ export function emptyClient(): Client {
     companyNumber: '',
     vatNumber: '',
     notes: '',
+    notesUpdatedAt: '',
     defaultHourlyRate: 500,
     defaultCurrency: 'GBP',
     defaultPaymentTermsDays: 14,
@@ -185,6 +186,7 @@ export function sampleWorkspace(): Workspace {
         companyNumber: '87654321',
         vatNumber: 'GB987654321',
         notes: 'Monthly product engineering retainer. Use the invoice number as payment reference.',
+        notesUpdatedAt: '2026-06-01T09:00:00.000Z',
         defaultHourlyRate: 500,
         defaultCurrency: 'GBP',
         defaultPaymentTermsDays: 14,
@@ -354,7 +356,8 @@ function normalizeClient(client: Partial<Client>): Client {
     defaultPaymentTermsDays: Number(client.defaultPaymentTermsDays || 14),
     defaultInvoiceTemplate: client.defaultInvoiceTemplate || 'classic',
     defaultServiceDescription: client.defaultServiceDescription || 'Professional services',
-    notes: client.notes || ''
+    notes: client.notes || '',
+    notesUpdatedAt: client.notesUpdatedAt || ''
   };
 }
 

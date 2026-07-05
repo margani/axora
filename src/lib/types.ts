@@ -29,6 +29,7 @@ export type Client = {
   companyNumber: string;
   vatNumber: string;
   notes: string;
+  notesUpdatedAt: string;
   defaultHourlyRate: number;
   defaultCurrency: Currency;
   defaultPaymentTermsDays: number;
