@@ -286,6 +286,63 @@ small {
   margin-top: 18px;
 }
 
+.hero-band {
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid #ded8ca;
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.hero-band span {
+  color: #65706c;
+  font-weight: 750;
+}
+
+.hero-band h2 {
+  margin-top: 4px;
+  font-size: clamp(1.45rem, 2.3vw, 2rem);
+}
+
+.period-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.period-card {
+  min-height: 210px;
+  display: grid;
+  align-content: space-between;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid #ded8ca;
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.period-card h3 {
+  font-size: 1.1rem;
+}
+
+.period-metrics {
+  display: grid;
+  gap: 4px;
+}
+
+.period-metrics strong {
+  font-size: 2rem;
+}
+
+.period-metrics b {
+  font-size: 1.25rem;
+}
+
 .split {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -329,6 +386,43 @@ small {
   grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
   gap: 18px;
   align-items: start;
+}
+
+.billing-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.period-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.period-row {
+  min-height: 72px;
+  width: 100%;
+  justify-content: space-between;
+  text-align: left;
+  color: #1d2525;
+  background: #f7f3ea;
+}
+
+.period-row:hover,
+.period-row.active {
+  background: #ebe4d5;
+}
+
+.period-row span,
+.period-row strong,
+.period-row small {
+  display: block;
+}
+
+.period-detail {
+  min-height: 72vh;
 }
 
 .form-grid {
@@ -686,6 +780,73 @@ textarea {
   background: #f9f6ef;
 }
 
+.workflow-section {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #e6dfd3;
+}
+
+.workflow-section h3 {
+  margin-bottom: 12px;
+}
+
+.invoice-summary {
+  margin-bottom: 14px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  align-items: center;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f0eadf;
+}
+
+.invoice-summary span {
+  color: #65706c;
+}
+
+.invoice-summary b {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  font-size: 1.15rem;
+}
+
+.pdf-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pdf-grid div {
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f7f3ea;
+}
+
+.pdf-grid span {
+  color: #65706c;
+}
+
+.activity-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.activity-item {
+  display: grid;
+  gap: 3px;
+  padding: 11px 12px;
+  border-radius: 8px;
+  background: #f7f3ea;
+}
+
+.activity-item small {
+  color: #65706c;
+}
+
 @media (max-width: 980px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -718,15 +879,22 @@ textarea {
   .topbar,
   .split,
   .work-area,
+  .billing-layout,
   .record-header {
     display: grid;
     grid-template-columns: 1fr;
   }
 
   .dashboard-grid,
+  .period-grid,
+  .pdf-grid,
   .form-grid,
   .template-picker {
     grid-template-columns: 1fr;
+  }
+
+  .hero-band {
+    display: grid;
   }
 
   .entry-grid,

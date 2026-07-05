@@ -1,6 +1,7 @@
 export type Currency = 'GBP' | 'USD' | 'EUR' | string;
 export type InvoiceTemplate = 'classic' | 'modern' | 'compact';
 export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue' | 'void';
+export type BillingPeriodStatus = 'active' | 'review' | 'invoiced' | 'paid' | 'archived';
 
 export type Profile = {
   companyName: string;
@@ -82,12 +83,35 @@ export type Invoice = {
   lastPdfGeneratedAt: string;
 };
 
+export type BillingPeriod = {
+  id: string;
+  clientId: string;
+  month: number;
+  year: number;
+  timesheetId: string;
+  invoiceId: string;
+  notes: string;
+  status: BillingPeriodStatus;
+  archived: boolean;
+  createdAt: string;
+};
+
+export type ActivityEvent = {
+  id: string;
+  at: string;
+  type: 'created' | 'updated' | 'invoice' | 'pdf' | 'import' | 'export' | 'archive' | 'payment';
+  message: string;
+  billingPeriodId?: string;
+};
+
 export type Workspace = {
-  version: 2;
+  version: 3;
   profile: Profile;
   clients: Client[];
+  billingPeriods: BillingPeriod[];
   timesheets: Timesheet[];
   invoices: Invoice[];
+  activity: ActivityEvent[];
   settings: {
     currency: Currency;
     invoiceTemplate: InvoiceTemplate;
