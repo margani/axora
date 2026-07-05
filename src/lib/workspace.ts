@@ -1,7 +1,7 @@
 import type { Client, Invoice, InvoiceItem, InvoiceTemplate, Timesheet, TimesheetEntry, Workspace } from './types';
 
-export const STORAGE_KEY = 'contractor-paperwork-kit.workspace.v1';
-export const SAVED_AT_KEY = 'contractor-paperwork-kit.savedAt';
+export const STORAGE_KEY = 'axora.workspace.v1';
+export const SAVED_AT_KEY = 'axora.savedAt';
 
 export function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID()}`;

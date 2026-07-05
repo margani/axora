@@ -238,10 +238,10 @@
 </script>
 
 <svelte:head>
-  <title>Contractor Paperwork Kit</title>
+  <title>Axora</title>
   <meta
     name="description"
-    content="Local-first paperwork for contractor timesheets, invoices, clients, and portable workspace files."
+    content="Axora is a local-first workspace for contractor timesheets, invoices, clients, and portable workspace files."
   />
 </svelte:head>
 
@@ -250,7 +250,7 @@
     <div class="brand">
       <FileText size={26} />
       <div>
-        <strong>Paperwork Kit</strong>
+        <strong>Axora</strong>
         <span>Local workspace</span>
       </div>
     </div>
