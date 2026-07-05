@@ -28,10 +28,12 @@ export type Client = {
   phone: string;
   companyNumber: string;
   vatNumber: string;
+  notes: string;
   defaultHourlyRate: number;
   defaultCurrency: Currency;
   defaultPaymentTermsDays: number;
   defaultInvoiceTemplate: InvoiceTemplate;
+  defaultServiceDescription: string;
 };
 
 export type TimesheetEntry = {

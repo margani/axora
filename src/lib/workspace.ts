@@ -61,10 +61,12 @@ export function emptyClient(): Client {
     phone: '',
     companyNumber: '',
     vatNumber: '',
+    notes: '',
     defaultHourlyRate: 500,
     defaultCurrency: 'GBP',
     defaultPaymentTermsDays: 14,
-    defaultInvoiceTemplate: 'classic'
+    defaultInvoiceTemplate: 'classic',
+    defaultServiceDescription: 'Professional services'
   };
 }
 
@@ -182,10 +184,12 @@ export function sampleWorkspace(): Workspace {
         phone: '+44 117 000 0000',
         companyNumber: '87654321',
         vatNumber: 'GB987654321',
+        notes: 'Monthly product engineering retainer. Use the invoice number as payment reference.',
         defaultHourlyRate: 500,
         defaultCurrency: 'GBP',
         defaultPaymentTermsDays: 14,
-        defaultInvoiceTemplate: 'modern'
+        defaultInvoiceTemplate: 'modern',
+        defaultServiceDescription: 'Product Engineering Services'
       }
     ],
     billingPeriods: [
@@ -348,7 +352,9 @@ function normalizeClient(client: Partial<Client>): Client {
     defaultHourlyRate: Number(client.defaultHourlyRate || 500),
     defaultCurrency: client.defaultCurrency || 'GBP',
     defaultPaymentTermsDays: Number(client.defaultPaymentTermsDays || 14),
-    defaultInvoiceTemplate: client.defaultInvoiceTemplate || 'classic'
+    defaultInvoiceTemplate: client.defaultInvoiceTemplate || 'classic',
+    defaultServiceDescription: client.defaultServiceDescription || 'Professional services',
+    notes: client.notes || ''
   };
 }
 

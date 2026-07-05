@@ -3,7 +3,6 @@
   import {
     Archive,
     BriefcaseBusiness,
-    CalendarDays,
     CheckCircle2,
     Copy,
     Download,
@@ -18,17 +17,20 @@
     Trash2,
     Upload
   } from '@lucide/svelte';
-  import type { ActivityEvent, BillingPeriod, Client, Invoice, Timesheet, Workspace } from '$lib/types';
+  import type { ActivityEvent, BillingPeriod, Client, Invoice, Workspace } from '$lib/types';
   import { generateInvoicePdf, generateTimesheetPdf } from '$lib/pdf';
   import {
     activity,
+    addDays,
     billableMinutes,
     clientDefaults,
     clearWorkspace,
     clientName,
     downloadJson,
+    duplicateInvoice,
     emptyBillingPeriod,
     emptyClient,
+    emptyInvoice,
     emptyInvoiceItem,
     emptyTimesheet,
     emptyTimesheetEntry,
@@ -43,71 +45,66 @@
     normalizeWorkspace,
     sampleWorkspace,
     saveWorkspace,
-    timesheetTotal
+    timesheetTotal,
+    todayIso
   } from '$lib/workspace';
 
-  type View = 'dashboard' | 'billing' | 'clients' | 'records' | 'settings';
+  type View = 'dashboard' | 'clients' | 'settings';
 
   let workspace: Workspace = sampleWorkspace();
-  let activeView: View = 'billing';
-  let selectedPeriodId = '';
+  let activeView: View = 'dashboard';
   let selectedClientId = '';
+  let selectedPeriodId = '';
   let lastSaved = '';
   let saveStatus: 'saved' | 'saving' | 'unsaved' = 'saved';
   let ready = false;
   let message = '';
   let searchQuery = '';
-  let showArchivedPeriods = false;
   let clearConfirmText = '';
   let saveTimer: ReturnType<typeof setTimeout>;
   let fileInput: HTMLInputElement;
   let logoInput: HTMLInputElement;
 
-  $: activePeriods = workspace.billingPeriods.filter((period) => showArchivedPeriods || !period.archived);
-  $: selectedPeriod = workspace.billingPeriods.find((period) => period.id === selectedPeriodId);
+  $: selectedClient = workspace.clients.find((client) => client.id === selectedClientId);
+  $: selectedClientPeriods = selectedClient ? clientPeriods(selectedClient.id) : [];
+  $: selectedPeriod = selectedClientPeriods.find((period) => period.id === selectedPeriodId) ?? selectedClientPeriods[0];
   $: selectedTimesheet = selectedPeriod ? periodTimesheet(selectedPeriod) : undefined;
   $: selectedInvoice = selectedPeriod ? periodInvoice(selectedPeriod) : undefined;
-  $: selectedClient = workspace.clients.find((client) => client.id === selectedClientId);
   $: totalOutstanding = workspace.invoices
     .filter((invoice) => !invoice.archived && invoice.status !== 'paid' && invoice.status !== 'void')
     .reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
-  $: currentMonthPeriods = currentClientPeriods();
+  $: revenueThisMonth = paidInvoicesForMonth(new Date().getMonth() + 1, new Date().getFullYear()).reduce(
+    (sum, invoice) => sum + invoiceTotal(invoice),
+    0
+  );
+  $: revenueThisYear = paidInvoicesForYear(new Date().getFullYear()).reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
+  $: hoursThisMonth = workspace.timesheets
+    .filter((timesheet) => !timesheet.archived && timesheet.month === new Date().getMonth() + 1 && timesheet.year === new Date().getFullYear())
+    .reduce((sum, timesheet) => sum + billableMinutes(timesheet), 0);
+  $: hoursThisYear = workspace.timesheets
+    .filter((timesheet) => !timesheet.archived && timesheet.year === new Date().getFullYear())
+    .reduce((sum, timesheet) => sum + billableMinutes(timesheet), 0);
   $: recentActivity = [...workspace.activity].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8);
-  $: periodHistory = selectedPeriod
-    ? workspace.activity.filter((event) => event.billingPeriodId === selectedPeriod.id).sort((a, b) => b.at.localeCompare(a.at))
-    : [];
-  $: outstandingInvoices = workspace.invoices
-    .filter((invoice) => !invoice.archived && invoice.status !== 'paid' && invoice.status !== 'void')
-    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  $: clientActivity = selectedClient ? activityForClient(selectedClient.id).slice(0, 8) : [];
   $: searchResults = buildSearchResults(searchQuery);
 
-  const navItems: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
-    { id: 'billing', label: 'Billing Periods', icon: CalendarDays },
-    { id: 'dashboard', label: 'Current Work', icon: LayoutDashboard },
-    { id: 'clients', label: 'Clients', icon: BriefcaseBusiness },
-    { id: 'records', label: 'Records', icon: ReceiptText },
-    { id: 'settings', label: 'Settings', icon: Settings }
-  ];
-
   const viewPaths: Record<View, string> = {
-    billing: '/',
-    dashboard: '/dashboard',
+    dashboard: '/',
     clients: '/clients',
-    records: '/records',
     settings: '/settings'
   };
 
   function viewFromPath(pathname: string): View {
     const found = Object.entries(viewPaths).find(([, path]) => path === pathname);
-    return (found?.[0] as View | undefined) ?? 'billing';
+    return (found?.[0] as View | undefined) ?? 'dashboard';
   }
 
   onMount(() => {
     const loaded = loadWorkspace();
     workspace = loaded.workspace;
     lastSaved = loaded.savedAt;
-    selectedPeriodId = workspace.billingPeriods.find((period) => !period.archived)?.id ?? workspace.billingPeriods[0]?.id ?? '';
     selectedClientId = workspace.clients[0]?.id ?? '';
+    selectedPeriodId = clientPeriods(selectedClientId)[0]?.id ?? '';
     activeView = viewFromPath(window.location.pathname);
     ready = true;
     const onPopState = () => {
@@ -146,6 +143,22 @@
     if (push && window.location.pathname !== path) history.pushState({}, '', path);
   }
 
+  function openClient(clientId: string) {
+    selectedClientId = clientId;
+    selectedPeriodId = clientPeriods(clientId)[0]?.id ?? '';
+    switchView('clients');
+  }
+
+  function clientPeriods(clientId: string) {
+    return workspace.billingPeriods
+      .filter((period) => period.clientId === clientId && !period.archived)
+      .sort((a, b) => b.year - a.year || b.month - a.month);
+  }
+
+  function clientInvoices(clientId: string) {
+    return workspace.invoices.filter((invoice) => invoice.clientId === clientId && !invoice.archived);
+  }
+
   function periodTimesheet(period: BillingPeriod) {
     return workspace.timesheets.find((timesheet) => timesheet.id === period.timesheetId);
   }
@@ -155,7 +168,7 @@
   }
 
   function periodTitle(period: BillingPeriod) {
-    return `${clientName(workspace.clients, period.clientId)} · ${monthName(period.month)} ${period.year}`;
+    return `${monthName(period.month)} ${period.year}`;
   }
 
   function periodHours(period: BillingPeriod) {
@@ -174,78 +187,119 @@
     return periodInvoice(period)?.currency || periodTimesheet(period)?.currency || workspace.settings.currency;
   }
 
-  function invoiceStatus(period: BillingPeriod) {
-    return periodInvoice(period)?.status || (period.status === 'paid' ? 'paid' : 'not created');
+  function clientOutstanding(clientId: string) {
+    return workspace.invoices
+      .filter((invoice) => invoice.clientId === clientId && !invoice.archived && invoice.status !== 'paid' && invoice.status !== 'void')
+      .reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
   }
 
-  function currentClientPeriods() {
+  function clientRevenueYtd(clientId: string) {
+    const year = new Date().getFullYear();
+    return workspace.invoices
+      .filter((invoice) => invoice.clientId === clientId && invoice.status === 'paid' && invoice.issueDate.startsWith(String(year)))
+      .reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
+  }
+
+  function clientHoursYtd(clientId: string) {
+    const year = new Date().getFullYear();
+    return workspace.timesheets
+      .filter((timesheet) => timesheet.clientId === clientId && !timesheet.archived && timesheet.year === year)
+      .reduce((sum, timesheet) => sum + billableMinutes(timesheet), 0);
+  }
+
+  function clientHoursThisMonth(clientId: string) {
     const now = new Date();
-    const month = now.getMonth() + 1;
-    const year = now.getFullYear();
-    return workspace.clients.map((client) => {
-      const period = workspace.billingPeriods.find((item) => item.clientId === client.id && item.month === month && item.year === year);
-      return { client, period };
-    });
+    return workspace.timesheets
+      .filter((timesheet) => timesheet.clientId === clientId && !timesheet.archived && timesheet.month === now.getMonth() + 1 && timesheet.year === now.getFullYear())
+      .reduce((sum, timesheet) => sum + billableMinutes(timesheet), 0);
   }
 
-  function createBillingPeriod(clientId = workspace.clients[0]?.id ?? '', month = new Date().getMonth() + 1, year = new Date().getFullYear()) {
-    const client = workspace.clients.find((item) => item.id === clientId);
+  function paidInvoicesForMonth(month: number, year: number) {
+    const prefix = `${year}-${String(month).padStart(2, '0')}`;
+    return workspace.invoices.filter((invoice) => !invoice.archived && invoice.status === 'paid' && invoice.issueDate.startsWith(prefix));
+  }
+
+  function paidInvoicesForYear(year: number) {
+    return workspace.invoices.filter((invoice) => !invoice.archived && invoice.status === 'paid' && invoice.issueDate.startsWith(String(year)));
+  }
+
+  function activityForClient(clientId: string) {
+    const periodIds = new Set(workspace.billingPeriods.filter((period) => period.clientId === clientId).map((period) => period.id));
+    const name = clientName(workspace.clients, clientId).toLowerCase();
+    return [...workspace.activity]
+      .filter((event) => (event.billingPeriodId && periodIds.has(event.billingPeriodId)) || event.message.toLowerCase().includes(name))
+      .sort((a, b) => b.at.localeCompare(a.at));
+  }
+
+  function createTimesheetForClient(client: Client, month = new Date().getMonth() + 1, year = new Date().getFullYear()) {
     const defaults = clientDefaults(client, workspace);
-    const timesheet = emptyTimesheet(clientId, defaults.currency, defaults.hourlyRate);
+    const timesheet = emptyTimesheet(client.id, defaults.currency, defaults.hourlyRate);
     timesheet.month = month;
     timesheet.year = year;
-    timesheet.title = `${monthName(month)} ${year} Timesheet`;
+    timesheet.title = `${monthName(month)} ${year}`;
     timesheet.entries = [];
-    const period = {
-      ...emptyBillingPeriod(clientId, month, year),
-      timesheetId: timesheet.id
+    const period = { ...emptyBillingPeriod(client.id, month, year), timesheetId: timesheet.id };
+    workspace = {
+      ...workspace,
+      timesheets: [timesheet, ...workspace.timesheets],
+      billingPeriods: [period, ...workspace.billingPeriods]
     };
-    addActivity(activity(`Created billing period ${periodTitle(period)}`, 'created', period.id));
-    replaceWorkspace(
-      { ...workspace, timesheets: [timesheet, ...workspace.timesheets], billingPeriods: [period, ...workspace.billingPeriods] },
-      'Billing period created'
-    );
+    selectedClientId = client.id;
     selectedPeriodId = period.id;
-    switchView('billing');
+    addActivity(activity(`Created ${periodTitle(period)} timesheet for ${client.name || 'client'}`, 'created', period.id));
+    switchView('clients');
+    touch('Timesheet created');
+    return period;
   }
 
-  function createNextMonth(period: BillingPeriod) {
-    const next = nextMonth(period.month, period.year);
-    createBillingPeriod(period.clientId, next.month, next.year);
+  function createNextTimesheet(client: Client) {
+    const latest = clientPeriods(client.id)[0];
+    const next = latest ? nextMonth(latest.month, latest.year) : { month: new Date().getMonth() + 1, year: new Date().getFullYear() };
+    createTimesheetForClient(client, next.month, next.year);
   }
 
-  function addEntry(period: BillingPeriod) {
-    const timesheet = periodTimesheet(period);
-    if (!timesheet) return;
-    const entry = emptyTimesheetEntry();
-    entry.description = `${monthName(period.month)} work`;
-    timesheet.entries = [...timesheet.entries, entry];
-    addActivity(activity(`Added entry to ${periodTitle(period)}`, 'updated', period.id));
-    touch('Entry added');
-  }
-
-  function removeEntry(period: BillingPeriod, entryId: string) {
-    const timesheet = periodTimesheet(period);
-    if (!timesheet) return;
-    timesheet.entries = timesheet.entries.filter((entry) => entry.id !== entryId);
-    addActivity(activity(`Removed entry from ${periodTitle(period)}`, 'updated', period.id));
-    touch('Entry removed');
+  function createInvoiceForClient(client: Client) {
+    const period = selectedPeriod?.clientId === client.id ? selectedPeriod : (clientPeriods(client.id)[0] ?? createTimesheetForClient(client));
+    generateInvoiceForPeriod(period);
   }
 
   function generateInvoiceForPeriod(period: BillingPeriod) {
     const timesheet = periodTimesheet(period);
     if (!timesheet) return;
-    const defaults = clientDefaults(workspace.clients.find((client) => client.id === period.clientId), workspace);
+    const client = workspace.clients.find((item) => item.id === period.clientId);
+    const defaults = clientDefaults(client, workspace);
     const invoice =
       periodInvoice(period) ??
       invoiceFromTimesheet(timesheet, nextInvoiceNumber(workspace.invoices), defaults.paymentTermsDays, defaults.invoiceTemplate);
     if (!period.invoiceId) {
+      invoice.items[0].description = `${client?.defaultServiceDescription || 'Professional services'} - ${monthName(period.month)} ${period.year}`;
       period.invoiceId = invoice.id;
       workspace.invoices = [invoice, ...workspace.invoices];
     }
     period.status = invoice.status === 'paid' ? 'paid' : 'invoiced';
-    addActivity(activity(`Generated Invoice ${invoice.invoiceNumber}`, 'invoice', period.id));
+    addActivity(activity(`Created Invoice ${invoice.invoiceNumber}`, 'invoice', period.id));
     touch('Invoice generated');
+  }
+
+  function createStandaloneInvoice(client: Client) {
+    const defaults = clientDefaults(client, workspace);
+    const invoice = emptyInvoice(client.id, defaults.currency, defaults.invoiceTemplate);
+    invoice.invoiceNumber = nextInvoiceNumber(workspace.invoices);
+    invoice.dueDate = addDays(todayIso(), defaults.paymentTermsDays);
+    invoice.items[0].description = client.defaultServiceDescription || 'Professional services';
+    invoice.items[0].unitPrice = defaults.hourlyRate;
+    workspace.invoices = [invoice, ...workspace.invoices];
+    addActivity(activity(`Created Invoice ${invoice.invoiceNumber}`, 'invoice'));
+    touch('Invoice created');
+  }
+
+  function duplicateInvoiceForClient(invoice: Invoice) {
+    const client = workspace.clients.find((item) => item.id === invoice.clientId);
+    const defaults = clientDefaults(client, workspace);
+    const copy = duplicateInvoice(invoice, workspace.invoices, defaults.paymentTermsDays);
+    workspace.invoices = [copy, ...workspace.invoices];
+    addActivity(activity(`Duplicated Invoice ${invoice.invoiceNumber}`, 'invoice'));
+    touch('Invoice duplicated');
   }
 
   function generatePeriodPdf(period: BillingPeriod) {
@@ -260,37 +314,59 @@
       generateInvoicePdf(workspace, invoice);
       invoice.lastPdfGeneratedAt = now;
     }
-    addActivity(activity(`Generated PDF for ${periodTitle(period)}`, 'pdf', period.id));
+    addActivity(activity(`Generated PDF for ${clientName(workspace.clients, period.clientId)} ${periodTitle(period)}`, 'pdf', period.id));
     touch('PDF generated');
   }
 
-  function markPaid(period: BillingPeriod) {
-    const invoice = periodInvoice(period);
-    if (invoice) invoice.status = 'paid';
-    period.status = 'paid';
-    addActivity(activity(`Marked ${periodTitle(period)} as paid`, 'payment', period.id));
-    touch('Marked paid');
+  function generateInvoicePdfOnly(invoice: Invoice) {
+    generateInvoicePdf(workspace, invoice);
+    invoice.lastPdfGeneratedAt = new Date().toISOString();
+    addActivity(activity(`Generated PDF for ${invoice.invoiceNumber}`, 'pdf'));
+    touch('Invoice PDF generated');
   }
 
-  function archivePeriod(period: BillingPeriod, archived = true) {
-    period.archived = archived;
-    period.status = archived ? 'archived' : periodInvoice(period) ? 'invoiced' : 'active';
+  function markInvoicePaid(invoice: Invoice) {
+    invoice.status = 'paid';
+    const period = workspace.billingPeriods.find((item) => item.invoiceId === invoice.id);
+    if (period) period.status = 'paid';
+    addActivity(activity(`Marked Invoice ${invoice.invoiceNumber} paid`, 'payment', period?.id));
+    touch('Invoice marked paid');
+  }
+
+  function archiveInvoiceForClient(invoice: Invoice, archived = true) {
+    invoice.archived = archived;
+    const period = workspace.billingPeriods.find((item) => item.invoiceId === invoice.id);
+    if (period) period.archived = archived;
+    addActivity(activity(`${archived ? 'Archived' : 'Restored'} Invoice ${invoice.invoiceNumber}`, 'archive', period?.id));
+    touch(archived ? 'Invoice archived' : 'Invoice restored');
+  }
+
+  function addEntry(period: BillingPeriod) {
     const timesheet = periodTimesheet(period);
-    const invoice = periodInvoice(period);
-    if (timesheet) timesheet.archived = archived;
-    if (invoice) invoice.archived = archived;
-    addActivity(activity(`${archived ? 'Archived' : 'Restored'} ${periodTitle(period)}`, 'archive', period.id));
-    touch(archived ? 'Billing period archived' : 'Billing period restored');
+    if (!timesheet) return;
+    const entry = emptyTimesheetEntry();
+    entry.description = workspace.clients.find((client) => client.id === period.clientId)?.defaultServiceDescription || `${monthName(period.month)} work`;
+    timesheet.entries = [...timesheet.entries, entry];
+    addActivity(activity(`Added hours to ${clientName(workspace.clients, period.clientId)} ${periodTitle(period)}`, 'updated', period.id));
+    touch('Hours added');
+  }
+
+  function removeEntry(period: BillingPeriod, entryId: string) {
+    const timesheet = periodTimesheet(period);
+    if (!timesheet) return;
+    timesheet.entries = timesheet.entries.filter((entry) => entry.id !== entryId);
+    touch('Entry removed');
   }
 
   function addClient() {
     const client = emptyClient();
     replaceWorkspace({ ...workspace, clients: [client, ...workspace.clients] }, 'Client created');
     selectedClientId = client.id;
+    switchView('clients');
   }
 
   function deleteClient(client: Client) {
-    if (!confirm(`Delete ${client.name || 'this client'}? Billing periods keep their client id.`)) return;
+    if (!confirm(`Delete ${client.name || 'this client'}? Timesheets and invoices keep their client id.`)) return;
     replaceWorkspace({ ...workspace, clients: workspace.clients.filter((item) => item.id !== client.id) }, 'Client deleted');
     selectedClientId = workspace.clients.find((item) => item.id !== client.id)?.id ?? '';
   }
@@ -301,11 +377,10 @@
     if (!file) return;
     try {
       const text = await file.text();
-      const imported = normalizeWorkspace(JSON.parse(text));
-      workspace = imported;
-      addActivity(activity('Imported workspace', 'import'));
-      selectedPeriodId = workspace.billingPeriods[0]?.id ?? '';
+      workspace = normalizeWorkspace(JSON.parse(text));
       selectedClientId = workspace.clients[0]?.id ?? '';
+      selectedPeriodId = clientPeriods(selectedClientId)[0]?.id ?? '';
+      addActivity(activity('Imported Workspace', 'import'));
       touch('Workspace imported');
     } catch (error) {
       message = error instanceof Error ? error.message : 'Could not import workspace.';
@@ -315,7 +390,7 @@
   }
 
   function exportWorkspace() {
-    addActivity(activity('Exported workspace', 'export'));
+    addActivity(activity('Exported Workspace', 'export'));
     lastSaved = saveWorkspace(workspace);
     downloadJson(workspace);
     message = 'Workspace exported';
@@ -346,8 +421,8 @@
     }
     clearWorkspace();
     workspace = sampleWorkspace();
-    selectedPeriodId = workspace.billingPeriods[0]?.id ?? '';
     selectedClientId = workspace.clients[0]?.id ?? '';
+    selectedPeriodId = clientPeriods(selectedClientId)[0]?.id ?? '';
     lastSaved = '';
     clearConfirmText = '';
     message = 'Local data cleared. Sample data is loaded but not saved.';
@@ -368,48 +443,41 @@
     return new Date(value).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
   }
 
-  function pdfDate(value: string | undefined) {
-    return value ? formatDateTime(value) : 'Never';
-  }
-
   function buildSearchResults(query: string) {
     const needle = query.trim().toLowerCase();
     if (!needle) return [];
-    const periodResults = workspace.billingPeriods
-      .filter((period) => periodTitle(period).toLowerCase().includes(needle))
-      .map((item) => ({ type: 'Billing Period', label: periodTitle(item), detail: invoiceStatus(item), id: item.id }));
     const clientResults = workspace.clients
-      .filter((client) => client.name.toLowerCase().includes(needle))
-      .map((item) => ({ type: 'Client', label: item.name || 'Untitled client', detail: item.email, id: item.id }));
+      .filter((client) => `${client.name} ${client.notes}`.toLowerCase().includes(needle))
+      .map((item) => ({ type: 'Client', label: item.name || 'Untitled client', detail: item.email || item.notes, id: item.id }));
+    const timesheetResults = workspace.billingPeriods
+      .filter((period) => `${clientName(workspace.clients, period.clientId)} ${periodTitle(period)} ${period.notes}`.toLowerCase().includes(needle))
+      .map((item) => ({ type: 'Timesheet', label: `${clientName(workspace.clients, item.clientId)} · ${periodTitle(item)}`, detail: `${formatHours(periodHours(item))}`, id: item.id }));
     const invoiceResults = workspace.invoices
-      .filter((invoice) => invoice.invoiceNumber.toLowerCase().includes(needle))
+      .filter((invoice) => `${invoice.invoiceNumber} ${clientName(workspace.clients, invoice.clientId)} ${invoice.notes}`.toLowerCase().includes(needle))
       .map((item) => ({ type: 'Invoice', label: item.invoiceNumber, detail: clientName(workspace.clients, item.clientId), id: item.id }));
-    return [...periodResults, ...clientResults, ...invoiceResults].slice(0, 8);
+    return [...clientResults, ...timesheetResults, ...invoiceResults].slice(0, 8);
   }
 
   function openSearchResult(result: { type: string; id: string }) {
     searchQuery = '';
     if (result.type === 'Client') {
-      selectedClientId = result.id;
-      switchView('clients');
-    } else if (result.type === 'Billing Period') {
-      selectedPeriodId = result.id;
-      switchView('billing');
-    } else {
-      const period = workspace.billingPeriods.find((item) => item.invoiceId === result.id);
+      openClient(result.id);
+    } else if (result.type === 'Timesheet') {
+      const period = workspace.billingPeriods.find((item) => item.id === result.id);
       if (period) {
         selectedPeriodId = period.id;
-        switchView('billing');
-      } else {
-        switchView('records');
+        openClient(period.clientId);
       }
+    } else {
+      const invoice = workspace.invoices.find((item) => item.id === result.id);
+      if (invoice) openClient(invoice.clientId);
     }
   }
 </script>
 
 <svelte:head>
   <title>Axora</title>
-  <meta name="description" content="Axora is a local-first monthly paperwork workspace for independent contractors." />
+  <meta name="description" content="Axora is a local-first client workspace for independent contractors." />
 </svelte:head>
 
 <div class="app-shell">
@@ -418,29 +486,44 @@
       <FileText size={26} />
       <div>
         <strong>Axora</strong>
-        <span>Monthly paperwork</span>
+        <span>Client workspace</span>
       </div>
     </div>
     <nav>
-      {#each navItems as item}
-        <button class:active={activeView === item.id} onclick={() => switchView(item.id)} title={item.label}>
-          <svelte:component this={item.icon} size={18} />
-          <span>{item.label}</span>
+      <button class:active={activeView === 'dashboard'} onclick={() => switchView('dashboard')}>
+        <LayoutDashboard size={18} />
+        <span>Dashboard</span>
+      </button>
+      <div class="nav-group">
+        <button class:active={activeView === 'clients'} onclick={() => switchView('clients')}>
+          <BriefcaseBusiness size={18} />
+          <span>Clients</span>
         </button>
-      {/each}
+        <div class="client-nav">
+          {#each workspace.clients as client}
+            <button class:active={activeView === 'clients' && selectedClientId === client.id} onclick={() => openClient(client.id)}>
+              <span>{client.name || 'Untitled client'}</span>
+            </button>
+          {/each}
+        </div>
+      </div>
+      <button class:active={activeView === 'settings'} onclick={() => switchView('settings')}>
+        <Settings size={18} />
+        <span>Settings</span>
+      </button>
     </nav>
   </aside>
 
   <main>
     <header class="topbar">
       <div>
-        <h1>{navItems.find((item) => item.id === activeView)?.label}</h1>
+        <h1>{activeView === 'clients' ? selectedClient?.name || 'Clients' : activeView === 'dashboard' ? 'Dashboard' : 'Settings'}</h1>
         <p>Last saved: {savedLabel()} <span class="save-status {saveStatus}">{saveStatusLabel()}</span></p>
       </div>
       <div class="top-actions">
         <div class="search-box">
           <Search size={16} />
-          <input bind:value={searchQuery} placeholder="Search monthly work, clients, invoices" />
+          <input bind:value={searchQuery} placeholder="Search clients, timesheets, invoices, notes" />
           {#if searchResults.length}
             <div class="search-results">
               {#each searchResults as result}
@@ -454,10 +537,10 @@
           {/if}
         </div>
         <input bind:this={fileInput} class="file-input" type="file" accept="application/json,.json" onchange={importWorkspace} />
-        <button class="secondary" onclick={() => fileInput.click()} title="Import Workspace"><Upload size={17} /><span>Import</span></button>
-        <button class="secondary" onclick={exportWorkspace} title="Export Workspace"><Download size={17} /><span>Export</span></button>
+        <button class="secondary" onclick={() => fileInput.click()}><Upload size={17} /><span>Import</span></button>
+        <button class="secondary" onclick={exportWorkspace}><Download size={17} /><span>Export</span></button>
         <input class="clear-input" bind:value={clearConfirmText} placeholder="Type DELETE" aria-label="Type DELETE to clear data" />
-        <button class="danger" onclick={clearLocal} title="Clear Local Data"><Trash2 size={17} /><span>Clear</span></button>
+        <button class="danger" onclick={clearLocal}><Trash2 size={17} /><span>Clear</span></button>
       </div>
     </header>
 
@@ -466,124 +549,134 @@
     {/if}
 
     {#if activeView === 'dashboard'}
-      <section class="hero-band">
-        <div>
-          <span>Current Month</span>
-          <h2>{monthName(new Date().getMonth() + 1)} {new Date().getFullYear()}</h2>
-        </div>
-        <button onclick={() => createBillingPeriod()}><Plus size={16} /> New Billing Period</button>
+      <section class="dashboard-grid">
+        <div class="metric"><span>Outstanding invoices</span><strong>{formatMoney(totalOutstanding, workspace.settings.currency)}</strong></div>
+        <div class="metric"><span>Revenue this month</span><strong>{formatMoney(revenueThisMonth, workspace.settings.currency)}</strong></div>
+        <div class="metric"><span>Revenue this year</span><strong>{formatMoney(revenueThisYear, workspace.settings.currency)}</strong></div>
+        <div class="metric"><span>Hours this month</span><strong>{formatHours(hoursThisMonth)}</strong></div>
+        <div class="metric"><span>Hours this year</span><strong>{formatHours(hoursThisYear)}</strong></div>
       </section>
       <section class="period-grid">
-        {#each currentMonthPeriods as item}
-          <article class="period-card">
+        {#each workspace.clients as client}
+          <article class="period-card client-overview">
             <div>
-              <h3>{item.client.name || 'Untitled client'}</h3>
-              <small>{item.period ? invoiceStatus(item.period) : 'No period yet'}</small>
+              <h3>{client.name || 'Untitled client'}</h3>
+              <small>{client.email || client.contactName || 'No contact details'}</small>
             </div>
             <div class="period-metrics">
-              <strong>{item.period ? formatHours(periodHours(item.period)) : '0.00h'}</strong>
-              <b>{item.period ? formatMoney(periodValue(item.period), periodCurrency(item.period)) : formatMoney(0, item.client.defaultCurrency)}</b>
+              <span>Outstanding: <b>{formatMoney(clientOutstanding(client.id), client.defaultCurrency)}</b></span>
+              <span>Hours this month: <b>{formatHours(clientHoursThisMonth(client.id))}</b></span>
             </div>
-            <div class="actions">
-              {#if item.period}
-                <button onclick={() => { selectedPeriodId = item.period!.id; switchView('billing'); }}>Open</button>
-                <button class="secondary" onclick={() => generateInvoiceForPeriod(item.period!)}><ReceiptText size={16} /> Invoice</button>
-              {:else}
-                <button onclick={() => createBillingPeriod(item.client.id)}>Start month</button>
-              {/if}
-            </div>
+            <button onclick={() => openClient(client.id)}>Open Client</button>
           </article>
         {/each}
       </section>
-      <section class="split">
-        <div>
-          <div class="section-title"><h2>Recent activity</h2><History size={18} /></div>
-          <div class="activity-list">
-            {#each recentActivity as event}
-              <div class="activity-item"><strong>{event.message}</strong><small>{formatDateTime(event.at)}</small></div>
-            {/each}
-          </div>
-        </div>
-        <div>
-          <div class="section-title"><h2>Outstanding invoices</h2><strong>{formatMoney(totalOutstanding, workspace.settings.currency)}</strong></div>
-          <div class="list">
-            {#each outstandingInvoices.slice(0, 5) as invoice}
-              <button class="row" onclick={() => openSearchResult({ type: 'Invoice', id: invoice.id })}>
-                <span><strong>{invoice.invoiceNumber}</strong><small>{clientName(workspace.clients, invoice.clientId)} · due {invoice.dueDate}</small></span>
-                <b>{formatMoney(invoiceTotal(invoice), invoice.currency)}</b>
-              </button>
-            {/each}
-          </div>
+      <section class="list-panel">
+        <div class="section-title"><h2>Recent Activity</h2><History size={18} /></div>
+        <div class="activity-list">
+          {#each recentActivity as event}
+            <div class="activity-item"><strong>{event.message}</strong><small>{formatDateTime(event.at)}</small></div>
+          {/each}
         </div>
       </section>
-    {:else if activeView === 'billing'}
-      <section class="billing-layout">
-        <div class="list-panel">
-          <div class="section-title">
-            <h2>Billing Periods</h2>
+    {:else if activeView === 'clients'}
+      {#if selectedClient}
+        <section class="client-workspace">
+          <div class="record-header">
+            <div>
+              <h2>{selectedClient.name || 'Untitled client'}</h2>
+              <p>{selectedClient.email || selectedClient.contactName || 'Client workspace'}</p>
+              <div class="record-meta">
+                <span>Outstanding {formatMoney(clientOutstanding(selectedClient.id), selectedClient.defaultCurrency)}</span>
+                <span>Revenue YTD {formatMoney(clientRevenueYtd(selectedClient.id), selectedClient.defaultCurrency)}</span>
+                <span>Hours YTD {formatHours(clientHoursYtd(selectedClient.id))}</span>
+              </div>
+            </div>
             <div class="actions">
-              <label class="inline-check"><input type="checkbox" bind:checked={showArchivedPeriods} /> Archived</label>
-              <button onclick={() => createBillingPeriod()}><Plus size={16} /> New</button>
+              <button onclick={() => createTimesheetForClient(selectedClient)}><Plus size={16} /> New Timesheet</button>
+              <button class="secondary" onclick={() => createStandaloneInvoice(selectedClient)}><ReceiptText size={16} /> New Invoice</button>
+              <button class="secondary" onclick={() => createInvoiceForClient(selectedClient)}><ReceiptText size={16} /> Generate Invoice From Timesheet</button>
             </div>
           </div>
-          <div class="period-list">
-            {#each activePeriods as period}
-              <button class="period-row" class:active={selectedPeriodId === period.id} onclick={() => (selectedPeriodId = period.id)}>
-                <span><strong>{periodTitle(period)}</strong><small>Invoice: {invoiceStatus(period)}</small></span>
-                <b>{formatHours(periodHours(period))}</b>
-              </button>
-            {/each}
-          </div>
-        </div>
 
-        <div class="editor period-detail">
+          <section class="workflow-section">
+            <div class="section-title">
+              <h2>Recent Timesheets</h2>
+              <button class="secondary" onclick={() => createNextTimesheet(selectedClient)}><Copy size={16} /> Create Next Timesheet</button>
+            </div>
+            <div class="period-grid compact">
+              {#each selectedClientPeriods.slice(0, 6) as period}
+                <article class="period-card">
+                  <div>
+                    <h3>{periodTitle(period)}</h3>
+                    <small>{periodInvoice(period)?.status ?? 'No invoice'}</small>
+                  </div>
+                  <div class="period-metrics">
+                    <strong>{formatHours(periodHours(period))}</strong>
+                    <b>{formatMoney(periodValue(period), periodCurrency(period))}</b>
+                  </div>
+                  <div class="actions">
+                    <button onclick={() => (selectedPeriodId = period.id)}>Open</button>
+                    <button class="secondary" onclick={() => createNextTimesheet(selectedClient)}><Copy size={16} /> Duplicate</button>
+                    <button class="secondary" onclick={() => generateInvoiceForPeriod(period)}><ReceiptText size={16} /> Invoice</button>
+                    <button class="secondary" onclick={() => generatePeriodPdf(period)}><Download size={16} /> PDF</button>
+                  </div>
+                </article>
+              {/each}
+            </div>
+          </section>
+
+          <section class="workflow-section">
+            <div class="section-title"><h2>Recent Invoices</h2><small>{clientInvoices(selectedClient.id).length} invoices</small></div>
+            <div class="period-grid compact">
+              {#each clientInvoices(selectedClient.id).slice(0, 6) as invoice}
+                <article class="period-card invoice-card">
+                  <div>
+                    <h3>{invoice.invoiceNumber}</h3>
+                    <small>{invoice.status}</small>
+                  </div>
+                  <div class="period-metrics">
+                    <strong>{formatMoney(invoiceTotal(invoice), invoice.currency)}</strong>
+                    <span>Due {invoice.dueDate}</span>
+                  </div>
+                  <div class="actions">
+                    <button onclick={() => selectedPeriodId = workspace.billingPeriods.find((period) => period.invoiceId === invoice.id)?.id ?? selectedPeriodId}>Open</button>
+                    <button class="secondary" onclick={() => generateInvoicePdfOnly(invoice)}><Download size={16} /> PDF</button>
+                    <button class="secondary" onclick={() => duplicateInvoiceForClient(invoice)}><Copy size={16} /> Duplicate</button>
+                    <button class="secondary" onclick={() => markInvoicePaid(invoice)}><CheckCircle2 size={16} /> Paid</button>
+                    <button class="secondary" onclick={() => archiveInvoiceForClient(invoice)}><Archive size={16} /> Archive</button>
+                  </div>
+                </article>
+              {/each}
+            </div>
+          </section>
+
           {#if selectedPeriod && selectedTimesheet}
-            <div class="record-header">
-              <div>
+            <section class="workflow-section focus-panel">
+              <div class="section-title">
                 <h2>{periodTitle(selectedPeriod)}</h2>
-                <p>{selectedPeriod.status} · Invoice: {invoiceStatus(selectedPeriod)}</p>
-                <div class="record-meta">
-                  <span>{formatHours(periodHours(selectedPeriod))}</span>
-                  <span>{formatMoney(periodValue(selectedPeriod), periodCurrency(selectedPeriod))}</span>
-                  <span>{selectedTimesheet.currency} · {formatMoney(selectedTimesheet.hourlyRate, selectedTimesheet.currency)}/h</span>
+                <div class="actions">
+                  <button onclick={() => addEntry(selectedPeriod)}><Plus size={16} /> Add Hours</button>
+                  <button class="secondary" onclick={() => generateInvoiceForPeriod(selectedPeriod)}><ReceiptText size={16} /> Generate Invoice</button>
+                  <button class="secondary" onclick={() => generatePeriodPdf(selectedPeriod)}><Download size={16} /> PDF</button>
                 </div>
               </div>
-              <div class="actions">
-                <button onclick={() => generateInvoiceForPeriod(selectedPeriod)}><ReceiptText size={16} /> Generate Invoice</button>
-                <button class="secondary" onclick={() => generatePeriodPdf(selectedPeriod)}><Download size={16} /> PDF</button>
-                <button class="secondary" onclick={() => createNextMonth(selectedPeriod)}><Copy size={16} /> Create Next Month</button>
-                <button class="secondary" onclick={() => archivePeriod(selectedPeriod, !selectedPeriod.archived)}>
-                  {#if selectedPeriod.archived}<RotateCcw size={16} /> Restore{:else}<Archive size={16} /> Archive{/if}
-                </button>
-                <button class="secondary" onclick={() => markPaid(selectedPeriod)}><CheckCircle2 size={16} /> Paid</button>
-              </div>
-            </div>
-
-            <section class="workflow-section">
-              <div class="section-title">
-                <h3>Timesheet Entries</h3>
-                <button onclick={() => addEntry(selectedPeriod)}><Plus size={16} /> Add Hours</button>
-              </div>
-              <div class="entry-list" oninput={() => touch('Hours saved')}>
+              <div class="entry-list" oninput={() => touch('Timesheet saved')}>
                 {#each selectedTimesheet.entries as entry}
                   <div class="entry-grid simple">
                     <label>Date <input type="date" bind:value={entry.date} /></label>
                     <label>Hours <input type="number" min="0" step="0.25" bind:value={entry.hours} /></label>
-                    <label class="check"><input type="checkbox" bind:checked={entry.billable} onchange={() => touch('Hours saved')} /> Billable</label>
+                    <label class="check"><input type="checkbox" bind:checked={entry.billable} onchange={() => touch('Timesheet saved')} /> Billable</label>
                     <label class="description">Description <input bind:value={entry.description} /></label>
                     <span class="duration">{formatHours(Number(entry.hours || 0) * 60)}</span>
-                    <button class="icon danger-icon" onclick={() => removeEntry(selectedPeriod, entry.id)} title="Remove entry"><Trash2 size={16} /></button>
+                    <button class="icon danger-icon" onclick={() => removeEntry(selectedPeriod, entry.id)}><Trash2 size={16} /></button>
                   </div>
                 {/each}
               </div>
-            </section>
-
-            <section class="workflow-section">
-              <div class="section-title"><h3>Invoice</h3>{#if selectedInvoice}<i class="status">{selectedInvoice.status}</i>{/if}</div>
               {#if selectedInvoice}
                 <div class="invoice-summary">
                   <strong>{selectedInvoice.invoiceNumber}</strong>
-                  <span>Issue {selectedInvoice.issueDate} · Due {selectedInvoice.dueDate}</span>
+                  <span>{selectedInvoice.status} · Due {selectedInvoice.dueDate}</span>
                   <b>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</b>
                 </div>
                 <div class="entry-list" oninput={() => touch('Invoice saved')}>
@@ -593,99 +686,60 @@
                       <label>Quantity <input type="number" min="0" step="0.01" bind:value={item.quantity} /></label>
                       <label>Unit price <input type="number" min="0" step="0.01" bind:value={item.unitPrice} /></label>
                       <span class="duration">{formatMoney(Number(item.quantity || 0) * Number(item.unitPrice || 0), selectedInvoice.currency)}</span>
-                      <button class="icon danger-icon" onclick={() => { selectedInvoice.items = selectedInvoice.items.filter((row) => row.id !== item.id); touch('Item removed'); }} title="Remove item"><Trash2 size={16} /></button>
+                      <button class="icon danger-icon" onclick={() => { selectedInvoice.items = selectedInvoice.items.filter((row) => row.id !== item.id); touch('Item removed'); }}><Trash2 size={16} /></button>
                     </div>
                   {/each}
                   <button class="secondary" onclick={() => { selectedInvoice.items = [...selectedInvoice.items, emptyInvoiceItem()]; touch('Item added'); }}><Plus size={16} /> Add Invoice Item</button>
                 </div>
-              {:else}
-                <div class="empty-state"><button onclick={() => generateInvoiceForPeriod(selectedPeriod)}><ReceiptText size={16} /> Generate invoice from hours</button></div>
               {/if}
             </section>
-
-            <section class="workflow-section">
-              <div class="section-title"><h3>Generated PDFs</h3><button class="secondary" onclick={() => generatePeriodPdf(selectedPeriod)}><Download size={16} /> Regenerate</button></div>
-              <div class="pdf-grid">
-                <div><strong>Timesheet PDF</strong><span>{pdfDate(selectedTimesheet.lastPdfGeneratedAt)}</span></div>
-                <div><strong>Invoice PDF</strong><span>{pdfDate(selectedInvoice?.lastPdfGeneratedAt)}</span></div>
-              </div>
-            </section>
-
-            <section class="workflow-section">
-              <h3>Notes</h3>
-              <textarea rows="4" bind:value={selectedPeriod.notes} oninput={() => touch('Notes saved')}></textarea>
-            </section>
-
-            <section class="workflow-section">
-              <div class="section-title"><h3>History</h3><History size={18} /></div>
-              <div class="activity-list">
-                {#each periodHistory as event}
-                  <div class="activity-item"><strong>{event.message}</strong><small>{formatDateTime(event.at)}</small></div>
-                {/each}
-              </div>
-            </section>
-          {:else}
-            <div class="empty-state">Create a billing period to start this month’s paperwork.</div>
           {/if}
-        </div>
-      </section>
-    {:else if activeView === 'clients'}
-      <section class="work-area">
-        <div class="list-panel">
-          <div class="section-title"><h2>Clients</h2><button onclick={addClient}><Plus size={16} /> New</button></div>
-          <div class="list">
-            {#each workspace.clients as client}
-              <button class="row" class:active={selectedClientId === client.id} onclick={() => (selectedClientId = client.id)}>
-                <span><strong>{client.name || 'Untitled client'}</strong><small>{client.email || client.contactName || 'No contact details'}</small></span>
-              </button>
-            {/each}
-          </div>
-        </div>
-        <div class="editor">
-          {#if selectedClient}
-            <div class="editor-head"><h2>{selectedClient.name || 'New client'}</h2><button class="danger" onclick={() => deleteClient(selectedClient)}><Trash2 size={16} /> Delete</button></div>
-            <div class="form-grid" oninput={() => touch('Client saved')}>
+
+          <section class="workflow-section">
+            <h2>Notes</h2>
+            <textarea rows="6" bind:value={selectedClient.notes} oninput={() => touch('Client notes saved')}></textarea>
+          </section>
+
+          <section class="workflow-section">
+            <div class="section-title"><h2>Recent Activity</h2><History size={18} /></div>
+            <div class="activity-list">
+              {#each clientActivity as event}
+                <div class="activity-item"><strong>{event.message}</strong><small>{formatDateTime(event.at)}</small></div>
+              {/each}
+            </div>
+          </section>
+
+          <section class="workflow-section">
+            <h2>Client Settings</h2>
+            <div class="form-grid" oninput={() => touch('Client settings saved')}>
               <label>Name <input bind:value={selectedClient.name} /></label>
-              <label>Contact name <input bind:value={selectedClient.contactName} /></label>
               <label>Email <input type="email" bind:value={selectedClient.email} /></label>
+              <label>Contact name <input bind:value={selectedClient.contactName} /></label>
               <label>Phone <input bind:value={selectedClient.phone} /></label>
-              <label>Default hourly rate <input type="number" min="0" step="0.01" bind:value={selectedClient.defaultHourlyRate} /></label>
-              <label>Default currency <input bind:value={selectedClient.defaultCurrency} /></label>
-              <label>Default payment terms <input type="number" min="0" bind:value={selectedClient.defaultPaymentTermsDays} /></label>
-              <label>Default invoice template
+              <label>Hourly Rate <input type="number" min="0" step="0.01" bind:value={selectedClient.defaultHourlyRate} /></label>
+              <label>Currency <input bind:value={selectedClient.defaultCurrency} /></label>
+              <label>Payment Terms <input type="number" min="0" bind:value={selectedClient.defaultPaymentTermsDays} /></label>
+              <label>Invoice Template
                 <select bind:value={selectedClient.defaultInvoiceTemplate}>
                   <option value="classic">Classic</option>
                   <option value="modern">Modern</option>
                   <option value="compact">Compact</option>
                 </select>
               </label>
-              <label class="wide">Address <textarea rows="5" bind:value={selectedClient.address}></textarea></label>
+              <label class="wide">Default Service Description <input bind:value={selectedClient.defaultServiceDescription} /></label>
+              <label class="wide">Address <textarea rows="4" bind:value={selectedClient.address}></textarea></label>
             </div>
-          {/if}
-        </div>
-      </section>
-    {:else if activeView === 'records'}
-      <section class="split">
-        <div>
-          <div class="section-title"><h2>Timesheets</h2><small>Internal records</small></div>
-          <div class="list">
-            {#each workspace.timesheets.slice(0, 8) as timesheet}
-              <div class="record-card"><strong>{timesheet.title}</strong><span>{clientName(workspace.clients, timesheet.clientId)} · {formatHours(billableMinutes(timesheet))}</span></div>
-            {/each}
-          </div>
-        </div>
-        <div>
-          <div class="section-title"><h2>Invoices</h2><small>Internal records</small></div>
-          <div class="list">
-            {#each workspace.invoices.slice(0, 8) as invoice}
-              <div class="record-card"><strong>{invoice.invoiceNumber}</strong><span>{clientName(workspace.clients, invoice.clientId)} · {invoice.status}</span><b>{formatMoney(invoiceTotal(invoice), invoice.currency)}</b></div>
-            {/each}
-          </div>
-        </div>
-      </section>
+            <div class="actions danger-zone">
+              <button class="danger" onclick={() => deleteClient(selectedClient)}><Trash2 size={16} /> Delete Client</button>
+            </div>
+          </section>
+        </section>
+      {:else}
+        <div class="empty-state"><button onclick={addClient}><Plus size={16} /> Create Client</button></div>
+      {/if}
     {:else if activeView === 'settings'}
       <section class="editor full">
-        <div class="editor-head"><h2>Profile and defaults</h2></div>
+        <div class="editor-head"><h2>Workspace Settings</h2></div>
         <div class="form-grid" oninput={() => touch('Settings saved')}>
           <label>Company name <input bind:value={workspace.profile.companyName} /></label>
           <label>Contact name <input bind:value={workspace.profile.contactName} /></label>
@@ -699,7 +753,6 @@
           <label>Sort code <input bind:value={workspace.profile.sortCode} /></label>
           <label>Account number <input bind:value={workspace.profile.accountNumber} /></label>
           <label>IBAN <input bind:value={workspace.profile.iban} /></label>
-          <label>Payment terms days <input type="number" min="0" bind:value={workspace.profile.paymentTermsDays} /></label>
           <label>Default currency <input bind:value={workspace.settings.currency} /></label>
         </div>
         <div class="settings-block">
