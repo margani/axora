@@ -27,17 +27,24 @@ export type Client = {
   phone: string;
   companyNumber: string;
   vatNumber: string;
+  defaultHourlyRate: number;
+  defaultCurrency: Currency;
+  defaultPaymentTermsDays: number;
+  defaultInvoiceTemplate: InvoiceTemplate;
 };
 
 export type TimesheetEntry = {
   id: string;
   date: string;
+  hours: number;
   startTime: string;
   endTime: string;
   breakMinutes: number;
   description: string;
   billable: boolean;
 };
+
+export type TimesheetEntryMode = 'simple' | 'detailed';
 
 export type Timesheet = {
   id: string;
@@ -47,6 +54,9 @@ export type Timesheet = {
   year: number;
   hourlyRate: number;
   currency: Currency;
+  entryMode: TimesheetEntryMode;
+  archived: boolean;
+  lastPdfGeneratedAt: string;
   entries: TimesheetEntry[];
 };
 
@@ -68,10 +78,12 @@ export type Invoice = {
   template: InvoiceTemplate;
   items: InvoiceItem[];
   notes: string;
+  archived: boolean;
+  lastPdfGeneratedAt: string;
 };
 
 export type Workspace = {
-  version: 1;
+  version: 2;
   profile: Profile;
   clients: Client[];
   timesheets: Timesheet[];
@@ -79,5 +91,6 @@ export type Workspace = {
   settings: {
     currency: Currency;
     invoiceTemplate: InvoiceTemplate;
+    companyLogo: string;
   };
 };
