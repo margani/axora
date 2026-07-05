@@ -11,7 +11,6 @@
     LayoutDashboard,
     Plus,
     ReceiptText,
-    RotateCcw,
     Search,
     Settings,
     Trash2,
@@ -50,6 +49,8 @@
   } from '$lib/workspace';
 
   type View = 'dashboard' | 'clients' | 'settings';
+  type ClientTab = 'overview' | 'timesheets' | 'invoices' | 'notes' | 'settings';
+  type SortOrder = 'newest' | 'oldest';
 
   let workspace: Workspace = sampleWorkspace();
   let activeView: View = 'dashboard';
@@ -60,6 +61,14 @@
   let ready = false;
   let message = '';
   let searchQuery = '';
+  let clientTab: ClientTab = 'overview';
+  let timesheetSearch = '';
+  let invoiceSearch = '';
+  let timesheetFilter = 'active';
+  let invoiceFilter = 'active';
+  let timesheetSort: SortOrder = 'newest';
+  let invoiceSort: SortOrder = 'newest';
+  let activityOpen = false;
   let clearConfirmText = '';
   let saveTimer: ReturnType<typeof setTimeout>;
   let fileInput: HTMLInputElement;
@@ -85,7 +94,10 @@
     .filter((timesheet) => !timesheet.archived && timesheet.year === new Date().getFullYear())
     .reduce((sum, timesheet) => sum + billableMinutes(timesheet), 0);
   $: recentActivity = [...workspace.activity].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8);
-  $: clientActivity = selectedClient ? activityForClient(selectedClient.id).slice(0, 8) : [];
+  $: allClientActivity = selectedClient ? activityForClient(selectedClient.id) : [];
+  $: clientActivity = allClientActivity.slice(0, 3);
+  $: filteredClientPeriods = selectedClient ? filteredPeriods(selectedClient.id) : [];
+  $: filteredClientInvoices = selectedClient ? filteredInvoices(selectedClient.id) : [];
   $: searchResults = buildSearchResults(searchQuery);
 
   const viewPaths: Record<View, string> = {
@@ -146,17 +158,18 @@
   function openClient(clientId: string) {
     selectedClientId = clientId;
     selectedPeriodId = clientPeriods(clientId)[0]?.id ?? '';
+    clientTab = 'overview';
     switchView('clients');
   }
 
   function clientPeriods(clientId: string) {
     return workspace.billingPeriods
-      .filter((period) => period.clientId === clientId && !period.archived)
+      .filter((period) => period.clientId === clientId)
       .sort((a, b) => b.year - a.year || b.month - a.month);
   }
 
   function clientInvoices(clientId: string) {
-    return workspace.invoices.filter((invoice) => invoice.clientId === clientId && !invoice.archived);
+    return workspace.invoices.filter((invoice) => invoice.clientId === clientId);
   }
 
   function periodTimesheet(period: BillingPeriod) {
@@ -253,9 +266,26 @@
   }
 
   function createNextTimesheet(client: Client) {
-    const latest = clientPeriods(client.id)[0];
+    const latest = clientPeriods(client.id).filter((period) => !period.archived)[0];
     const next = latest ? nextMonth(latest.month, latest.year) : { month: new Date().getMonth() + 1, year: new Date().getFullYear() };
     createTimesheetForClient(client, next.month, next.year);
+  }
+
+  function duplicateTimesheetPeriod(period: BillingPeriod) {
+    const next = nextMonth(period.month, period.year);
+    const client = workspace.clients.find((item) => item.id === period.clientId);
+    if (!client) return;
+    createTimesheetForClient(client, next.month, next.year);
+  }
+
+  function openPeriod(period: BillingPeriod) {
+    selectedPeriodId = period.id;
+    clientTab = 'timesheets';
+  }
+
+  function openInvoice(invoice: Invoice) {
+    selectedPeriodId = workspace.billingPeriods.find((period) => period.invoiceId === invoice.id)?.id ?? selectedPeriodId;
+    clientTab = 'invoices';
   }
 
   function createInvoiceForClient(client: Client) {
@@ -341,6 +371,14 @@
     touch(archived ? 'Invoice archived' : 'Invoice restored');
   }
 
+  function archivePeriod(period: BillingPeriod, archived = true) {
+    period.archived = archived;
+    const timesheet = periodTimesheet(period);
+    if (timesheet) timesheet.archived = archived;
+    addActivity(activity(`${archived ? 'Archived' : 'Restored'} ${clientName(workspace.clients, period.clientId)} ${periodTitle(period)}`, 'archive', period.id));
+    touch(archived ? 'Timesheet archived' : 'Timesheet restored');
+  }
+
   function addEntry(period: BillingPeriod) {
     const timesheet = periodTimesheet(period);
     if (!timesheet) return;
@@ -356,6 +394,11 @@
     if (!timesheet) return;
     timesheet.entries = timesheet.entries.filter((entry) => entry.id !== entryId);
     touch('Entry removed');
+  }
+
+  function updateClientNotes(client: Client) {
+    client.notesUpdatedAt = new Date().toISOString();
+    touch('Client notes saved');
   }
 
   function addClient() {
@@ -456,6 +499,27 @@
       .filter((invoice) => `${invoice.invoiceNumber} ${clientName(workspace.clients, invoice.clientId)} ${invoice.notes}`.toLowerCase().includes(needle))
       .map((item) => ({ type: 'Invoice', label: item.invoiceNumber, detail: clientName(workspace.clients, item.clientId), id: item.id }));
     return [...clientResults, ...timesheetResults, ...invoiceResults].slice(0, 8);
+  }
+
+  function filteredPeriods(clientId: string) {
+    const needle = timesheetSearch.trim().toLowerCase();
+    return clientPeriods(clientId)
+      .filter((period) => timesheetFilter === 'archived' || !period.archived)
+      .filter((period) => `${periodTitle(period)} ${period.notes}`.toLowerCase().includes(needle))
+      .sort((a, b) => (timesheetSort === 'newest' ? b.year - a.year || b.month - a.month : a.year - b.year || a.month - b.month));
+  }
+
+  function filteredInvoices(clientId: string) {
+    const needle = invoiceSearch.trim().toLowerCase();
+    return clientInvoices(clientId)
+      .filter((invoice) => {
+        if (invoiceFilter === 'archived') return invoice.archived;
+        if (invoiceFilter === 'unpaid') return !invoice.archived && invoice.status !== 'paid' && invoice.status !== 'void';
+        if (invoiceFilter === 'paid') return !invoice.archived && invoice.status === 'paid';
+        return !invoice.archived;
+      })
+      .filter((invoice) => `${invoice.invoiceNumber} ${invoice.status} ${invoice.notes}`.toLowerCase().includes(needle))
+      .sort((a, b) => (invoiceSort === 'newest' ? b.issueDate.localeCompare(a.issueDate) : a.issueDate.localeCompare(b.issueDate)));
   }
 
   function openSearchResult(result: { type: string; id: string }) {
@@ -582,15 +646,15 @@
     {:else if activeView === 'clients'}
       {#if selectedClient}
         <section class="client-workspace">
-          <div class="record-header">
+          <div class="client-summary">
             <div>
               <h2>{selectedClient.name || 'Untitled client'}</h2>
               <p>{selectedClient.email || selectedClient.contactName || 'Client workspace'}</p>
-              <div class="record-meta">
-                <span>Outstanding {formatMoney(clientOutstanding(selectedClient.id), selectedClient.defaultCurrency)}</span>
-                <span>Revenue YTD {formatMoney(clientRevenueYtd(selectedClient.id), selectedClient.defaultCurrency)}</span>
-                <span>Hours YTD {formatHours(clientHoursYtd(selectedClient.id))}</span>
-              </div>
+            </div>
+            <div class="summary-metrics">
+              <div><span>Outstanding</span><strong>{formatMoney(clientOutstanding(selectedClient.id), selectedClient.defaultCurrency)}</strong></div>
+              <div><span>Revenue YTD</span><strong>{formatMoney(clientRevenueYtd(selectedClient.id), selectedClient.defaultCurrency)}</strong></div>
+              <div><span>Hours YTD</span><strong>{formatHours(clientHoursYtd(selectedClient.id))}</strong></div>
             </div>
             <div class="actions">
               <button onclick={() => createTimesheetForClient(selectedClient)}><Plus size={16} /> New Timesheet</button>
@@ -599,141 +663,243 @@
             </div>
           </div>
 
-          <section class="workflow-section">
-            <div class="section-title">
-              <h2>Recent Timesheets</h2>
-              <button class="secondary" onclick={() => createNextTimesheet(selectedClient)}><Copy size={16} /> Create Next Timesheet</button>
-            </div>
-            <div class="period-grid compact">
-              {#each selectedClientPeriods.slice(0, 6) as period}
-                <article class="period-card">
-                  <div>
-                    <h3>{periodTitle(period)}</h3>
-                    <small>{periodInvoice(period)?.status ?? 'No invoice'}</small>
-                  </div>
-                  <div class="period-metrics">
-                    <strong>{formatHours(periodHours(period))}</strong>
-                    <b>{formatMoney(periodValue(period), periodCurrency(period))}</b>
-                  </div>
-                  <div class="actions">
-                    <button onclick={() => (selectedPeriodId = period.id)}>Open</button>
-                    <button class="secondary" onclick={() => createNextTimesheet(selectedClient)}><Copy size={16} /> Duplicate</button>
-                    <button class="secondary" onclick={() => generateInvoiceForPeriod(period)}><ReceiptText size={16} /> Invoice</button>
-                    <button class="secondary" onclick={() => generatePeriodPdf(period)}><Download size={16} /> PDF</button>
-                  </div>
-                </article>
-              {/each}
-            </div>
-          </section>
+          <div class="client-tabs" role="tablist" aria-label="Client sections">
+            <button class:active={clientTab === 'overview'} onclick={() => (clientTab = 'overview')}>Overview</button>
+            <button class:active={clientTab === 'timesheets'} onclick={() => (clientTab = 'timesheets')}>Timesheets</button>
+            <button class:active={clientTab === 'invoices'} onclick={() => (clientTab = 'invoices')}>Invoices</button>
+            <button class:active={clientTab === 'notes'} onclick={() => (clientTab = 'notes')}>Notes</button>
+            <button class:active={clientTab === 'settings'} onclick={() => (clientTab = 'settings')}>Settings</button>
+          </div>
 
-          <section class="workflow-section">
-            <div class="section-title"><h2>Recent Invoices</h2><small>{clientInvoices(selectedClient.id).length} invoices</small></div>
-            <div class="period-grid compact">
-              {#each clientInvoices(selectedClient.id).slice(0, 6) as invoice}
-                <article class="period-card invoice-card">
-                  <div>
-                    <h3>{invoice.invoiceNumber}</h3>
-                    <small>{invoice.status}</small>
-                  </div>
-                  <div class="period-metrics">
-                    <strong>{formatMoney(invoiceTotal(invoice), invoice.currency)}</strong>
-                    <span>Due {invoice.dueDate}</span>
-                  </div>
-                  <div class="actions">
-                    <button onclick={() => selectedPeriodId = workspace.billingPeriods.find((period) => period.invoiceId === invoice.id)?.id ?? selectedPeriodId}>Open</button>
-                    <button class="secondary" onclick={() => generateInvoicePdfOnly(invoice)}><Download size={16} /> PDF</button>
-                    <button class="secondary" onclick={() => duplicateInvoiceForClient(invoice)}><Copy size={16} /> Duplicate</button>
-                    <button class="secondary" onclick={() => markInvoicePaid(invoice)}><CheckCircle2 size={16} /> Paid</button>
-                    <button class="secondary" onclick={() => archiveInvoiceForClient(invoice)}><Archive size={16} /> Archive</button>
-                  </div>
-                </article>
-              {/each}
-            </div>
-          </section>
-
-          {#if selectedPeriod && selectedTimesheet}
-            <section class="workflow-section focus-panel">
-              <div class="section-title">
-                <h2>{periodTitle(selectedPeriod)}</h2>
-                <div class="actions">
-                  <button onclick={() => addEntry(selectedPeriod)}><Plus size={16} /> Add Hours</button>
-                  <button class="secondary" onclick={() => generateInvoiceForPeriod(selectedPeriod)}><ReceiptText size={16} /> Generate Invoice</button>
-                  <button class="secondary" onclick={() => generatePeriodPdf(selectedPeriod)}><Download size={16} /> PDF</button>
+          {#if clientTab === 'overview'}
+            <section class="overview-grid">
+              <div class="overview-panel">
+                <div class="section-title">
+                  <h2>Recent Timesheets</h2>
+                  <button class="secondary" onclick={() => (clientTab = 'timesheets')}>View All Timesheets</button>
+                </div>
+                <div class="mini-card-list">
+                  {#each selectedClientPeriods.filter((period) => !period.archived).slice(0, 3) as period}
+                    <article class="mini-card">
+                      <div>
+                        <h3>{periodTitle(period)}</h3>
+                        <small>{formatHours(periodHours(period))} · {formatMoney(periodValue(period), periodCurrency(period))}</small>
+                      </div>
+                      <div class="actions">
+                        <button onclick={() => openPeriod(period)}>Open</button>
+                        <button class="secondary" onclick={() => duplicateTimesheetPeriod(period)}><Copy size={16} /> Duplicate</button>
+                        <button class="secondary" onclick={() => generateInvoiceForPeriod(period)}><ReceiptText size={16} /> Invoice</button>
+                      </div>
+                    </article>
+                  {/each}
                 </div>
               </div>
-              <div class="entry-list" oninput={() => touch('Timesheet saved')}>
-                {#each selectedTimesheet.entries as entry}
-                  <div class="entry-grid simple">
-                    <label>Date <input type="date" bind:value={entry.date} /></label>
-                    <label>Hours <input type="number" min="0" step="0.25" bind:value={entry.hours} /></label>
-                    <label class="check"><input type="checkbox" bind:checked={entry.billable} onchange={() => touch('Timesheet saved')} /> Billable</label>
-                    <label class="description">Description <input bind:value={entry.description} /></label>
-                    <span class="duration">{formatHours(Number(entry.hours || 0) * 60)}</span>
-                    <button class="icon danger-icon" onclick={() => removeEntry(selectedPeriod, entry.id)}><Trash2 size={16} /></button>
-                  </div>
+              <div class="overview-panel">
+                <div class="section-title">
+                  <h2>Recent Invoices</h2>
+                  <button class="secondary" onclick={() => (clientTab = 'invoices')}>View All Invoices</button>
+                </div>
+                <div class="mini-card-list">
+                  {#each clientInvoices(selectedClient.id).filter((invoice) => !invoice.archived).slice(0, 3) as invoice}
+                    <article class="mini-card">
+                      <div>
+                        <h3>{invoice.invoiceNumber}</h3>
+                        <small>{formatMoney(invoiceTotal(invoice), invoice.currency)} · {invoice.status}</small>
+                      </div>
+                      <div class="actions">
+                        <button onclick={() => openInvoice(invoice)}>Open</button>
+                        <button class="secondary" onclick={() => generateInvoicePdfOnly(invoice)}><Download size={16} /> PDF</button>
+                      </div>
+                    </article>
+                  {/each}
+                </div>
+              </div>
+            </section>
+
+            <section class="overview-panel recent-activity-compact">
+              <div class="section-title">
+                <h2>Recent Activity</h2>
+                <button class="secondary" onclick={() => (activityOpen = true)}>View Full Activity</button>
+              </div>
+              <div class="activity-list compact">
+                {#each clientActivity as event}
+                  <div class="activity-item"><strong>{event.message}</strong><small>{formatDateTime(event.at)}</small></div>
                 {/each}
               </div>
-              {#if selectedInvoice}
-                <div class="invoice-summary">
-                  <strong>{selectedInvoice.invoiceNumber}</strong>
-                  <span>{selectedInvoice.status} · Due {selectedInvoice.dueDate}</span>
-                  <b>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</b>
-                </div>
-                <div class="entry-list" oninput={() => touch('Invoice saved')}>
-                  {#each selectedInvoice.items as item}
-                    <div class="item-grid">
-                      <label>Description <input bind:value={item.description} /></label>
-                      <label>Quantity <input type="number" min="0" step="0.01" bind:value={item.quantity} /></label>
-                      <label>Unit price <input type="number" min="0" step="0.01" bind:value={item.unitPrice} /></label>
-                      <span class="duration">{formatMoney(Number(item.quantity || 0) * Number(item.unitPrice || 0), selectedInvoice.currency)}</span>
-                      <button class="icon danger-icon" onclick={() => { selectedInvoice.items = selectedInvoice.items.filter((row) => row.id !== item.id); touch('Item removed'); }}><Trash2 size={16} /></button>
+            </section>
+          {:else if clientTab === 'timesheets'}
+            <section class="tab-panel">
+              <div class="section-title">
+                <h2>Timesheets</h2>
+                <button class="secondary" onclick={() => createNextTimesheet(selectedClient)}><Copy size={16} /> Create Next Timesheet</button>
+              </div>
+              <div class="list-tools">
+                <input bind:value={timesheetSearch} placeholder="Search timesheets" />
+                <select bind:value={timesheetFilter}>
+                  <option value="active">Active</option>
+                  <option value="archived">Archived</option>
+                </select>
+                <select bind:value={timesheetSort}>
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                </select>
+              </div>
+              <div class="period-grid compact">
+                {#each filteredClientPeriods as period}
+                  <article class="period-card">
+                    <div>
+                      <h3>{periodTitle(period)}</h3>
+                      <small>{periodInvoice(period)?.status ?? 'No invoice'}{period.archived ? ' · Archived' : ''}</small>
                     </div>
-                  {/each}
-                  <button class="secondary" onclick={() => { selectedInvoice.items = [...selectedInvoice.items, emptyInvoiceItem()]; touch('Item added'); }}><Plus size={16} /> Add Invoice Item</button>
-                </div>
+                    <div class="period-metrics">
+                      <strong>{formatHours(periodHours(period))}</strong>
+                      <b>{formatMoney(periodValue(period), periodCurrency(period))}</b>
+                    </div>
+                    <div class="actions">
+                      <button onclick={() => openPeriod(period)}>Open</button>
+                      <button class="secondary" onclick={() => duplicateTimesheetPeriod(period)}><Copy size={16} /> Duplicate</button>
+                      <button class="secondary" onclick={() => generateInvoiceForPeriod(period)}><ReceiptText size={16} /> Invoice</button>
+                      <button class="secondary" onclick={() => archivePeriod(period)}><Archive size={16} /> Archive</button>
+                    </div>
+                  </article>
+                {/each}
+              </div>
+
+              {#if selectedPeriod && selectedTimesheet}
+                <section class="workflow-section focus-panel">
+                  <div class="section-title">
+                    <h2>{periodTitle(selectedPeriod)}</h2>
+                    <div class="actions">
+                      <button onclick={() => addEntry(selectedPeriod)}><Plus size={16} /> Add Hours</button>
+                      <button class="secondary" onclick={() => generateInvoiceForPeriod(selectedPeriod)}><ReceiptText size={16} /> Generate Invoice</button>
+                      <button class="secondary" onclick={() => generatePeriodPdf(selectedPeriod)}><Download size={16} /> PDF</button>
+                    </div>
+                  </div>
+                  <div class="entry-list" oninput={() => touch('Timesheet saved')}>
+                    {#each selectedTimesheet.entries as entry}
+                      <div class="entry-grid simple">
+                        <label>Date <input type="date" bind:value={entry.date} /></label>
+                        <label>Hours <input type="number" min="0" step="0.25" bind:value={entry.hours} /></label>
+                        <label class="check"><input type="checkbox" bind:checked={entry.billable} onchange={() => touch('Timesheet saved')} /> Billable</label>
+                        <label class="description">Description <input bind:value={entry.description} /></label>
+                        <span class="duration">{formatHours(Number(entry.hours || 0) * 60)}</span>
+                        <button class="icon danger-icon" onclick={() => removeEntry(selectedPeriod, entry.id)}><Trash2 size={16} /></button>
+                      </div>
+                    {/each}
+                  </div>
+                </section>
               {/if}
             </section>
-          {/if}
-
-          <section class="workflow-section">
-            <h2>Notes</h2>
-            <textarea rows="6" bind:value={selectedClient.notes} oninput={() => touch('Client notes saved')}></textarea>
-          </section>
-
-          <section class="workflow-section">
-            <div class="section-title"><h2>Recent Activity</h2><History size={18} /></div>
-            <div class="activity-list">
-              {#each clientActivity as event}
-                <div class="activity-item"><strong>{event.message}</strong><small>{formatDateTime(event.at)}</small></div>
-              {/each}
-            </div>
-          </section>
-
-          <section class="workflow-section">
-            <h2>Client Settings</h2>
-            <div class="form-grid" oninput={() => touch('Client settings saved')}>
-              <label>Name <input bind:value={selectedClient.name} /></label>
-              <label>Email <input type="email" bind:value={selectedClient.email} /></label>
-              <label>Contact name <input bind:value={selectedClient.contactName} /></label>
-              <label>Phone <input bind:value={selectedClient.phone} /></label>
-              <label>Hourly Rate <input type="number" min="0" step="0.01" bind:value={selectedClient.defaultHourlyRate} /></label>
-              <label>Currency <input bind:value={selectedClient.defaultCurrency} /></label>
-              <label>Payment Terms <input type="number" min="0" bind:value={selectedClient.defaultPaymentTermsDays} /></label>
-              <label>Invoice Template
-                <select bind:value={selectedClient.defaultInvoiceTemplate}>
-                  <option value="classic">Classic</option>
-                  <option value="modern">Modern</option>
-                  <option value="compact">Compact</option>
+          {:else if clientTab === 'invoices'}
+            <section class="tab-panel">
+              <div class="section-title"><h2>Invoices</h2><button class="secondary" onclick={() => createStandaloneInvoice(selectedClient)}><Plus size={16} /> New Invoice</button></div>
+              <div class="list-tools">
+                <input bind:value={invoiceSearch} placeholder="Search invoices" />
+                <select bind:value={invoiceFilter}>
+                  <option value="active">Active</option>
+                  <option value="unpaid">Unpaid</option>
+                  <option value="paid">Paid</option>
+                  <option value="archived">Archived</option>
                 </select>
-              </label>
-              <label class="wide">Default Service Description <input bind:value={selectedClient.defaultServiceDescription} /></label>
-              <label class="wide">Address <textarea rows="4" bind:value={selectedClient.address}></textarea></label>
-            </div>
-            <div class="actions danger-zone">
-              <button class="danger" onclick={() => deleteClient(selectedClient)}><Trash2 size={16} /> Delete Client</button>
-            </div>
-          </section>
+                <select bind:value={invoiceSort}>
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                </select>
+              </div>
+              <div class="period-grid compact">
+                {#each filteredClientInvoices as invoice}
+                  <article class="period-card invoice-card">
+                    <div>
+                      <h3>{invoice.invoiceNumber}</h3>
+                      <small>{invoice.status}{invoice.archived ? ' · Archived' : ''}</small>
+                    </div>
+                    <div class="period-metrics">
+                      <strong>{formatMoney(invoiceTotal(invoice), invoice.currency)}</strong>
+                      <span>Due {invoice.dueDate}</span>
+                    </div>
+                    <div class="actions">
+                      <button onclick={() => openInvoice(invoice)}>Open</button>
+                      <button class="secondary" onclick={() => generateInvoicePdfOnly(invoice)}><Download size={16} /> PDF</button>
+                      <button class="secondary" onclick={() => duplicateInvoiceForClient(invoice)}><Copy size={16} /> Duplicate</button>
+                      <button class="secondary" onclick={() => markInvoicePaid(invoice)}><CheckCircle2 size={16} /> Paid</button>
+                      <button class="secondary" onclick={() => archiveInvoiceForClient(invoice)}><Archive size={16} /> Archive</button>
+                    </div>
+                  </article>
+                {/each}
+              </div>
+
+              {#if selectedInvoice}
+                <section class="workflow-section focus-panel">
+                  <div class="invoice-summary">
+                    <strong>{selectedInvoice.invoiceNumber}</strong>
+                    <span>{selectedInvoice.status} · Due {selectedInvoice.dueDate}</span>
+                    <b>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</b>
+                  </div>
+                  <div class="entry-list" oninput={() => touch('Invoice saved')}>
+                    {#each selectedInvoice.items as item}
+                      <div class="item-grid">
+                        <label>Description <input bind:value={item.description} /></label>
+                        <label>Quantity <input type="number" min="0" step="0.01" bind:value={item.quantity} /></label>
+                        <label>Unit price <input type="number" min="0" step="0.01" bind:value={item.unitPrice} /></label>
+                        <span class="duration">{formatMoney(Number(item.quantity || 0) * Number(item.unitPrice || 0), selectedInvoice.currency)}</span>
+                        <button class="icon danger-icon" onclick={() => { selectedInvoice.items = selectedInvoice.items.filter((row) => row.id !== item.id); touch('Item removed'); }}><Trash2 size={16} /></button>
+                      </div>
+                    {/each}
+                    <button class="secondary" onclick={() => { selectedInvoice.items = [...selectedInvoice.items, emptyInvoiceItem()]; touch('Item added'); }}><Plus size={16} /> Add Invoice Item</button>
+                  </div>
+                </section>
+              {/if}
+            </section>
+          {:else if clientTab === 'notes'}
+            <section class="tab-panel notes-panel">
+              <div class="section-title">
+                <h2>Notes</h2>
+                <small>Last updated {selectedClient.notesUpdatedAt ? formatDateTime(selectedClient.notesUpdatedAt) : 'Never'}</small>
+              </div>
+              <textarea rows="14" bind:value={selectedClient.notes} oninput={() => updateClientNotes(selectedClient)}></textarea>
+            </section>
+          {:else if clientTab === 'settings'}
+            <section class="tab-panel">
+              <h2>Client Settings</h2>
+              <div class="form-grid" oninput={() => touch('Client settings saved')}>
+                <label>Name <input bind:value={selectedClient.name} /></label>
+                <label>Email <input type="email" bind:value={selectedClient.email} /></label>
+                <label>Contact name <input bind:value={selectedClient.contactName} /></label>
+                <label>Phone <input bind:value={selectedClient.phone} /></label>
+                <label>Hourly Rate <input type="number" min="0" step="0.01" bind:value={selectedClient.defaultHourlyRate} /></label>
+                <label>Currency <input bind:value={selectedClient.defaultCurrency} /></label>
+                <label>Payment Terms <input type="number" min="0" bind:value={selectedClient.defaultPaymentTermsDays} /></label>
+                <label>Invoice Template
+                  <select bind:value={selectedClient.defaultInvoiceTemplate}>
+                    <option value="classic">Classic</option>
+                    <option value="modern">Modern</option>
+                    <option value="compact">Compact</option>
+                  </select>
+                </label>
+                <label class="wide">Default Service Description <input bind:value={selectedClient.defaultServiceDescription} /></label>
+                <label class="wide">Address <textarea rows="4" bind:value={selectedClient.address}></textarea></label>
+              </div>
+              <div class="actions danger-zone">
+                <button class="danger" onclick={() => deleteClient(selectedClient)}><Trash2 size={16} /> Delete Client</button>
+              </div>
+            </section>
+          {/if}
         </section>
+        {#if activityOpen}
+          <div class="modal-backdrop">
+            <section class="wizard">
+              <div class="editor-head">
+                <h2>{selectedClient.name || 'Client'} Activity</h2>
+                <button class="secondary" onclick={() => (activityOpen = false)}>Close</button>
+              </div>
+              <div class="activity-list">
+                {#each allClientActivity as event}
+                  <div class="activity-item"><strong>{event.message}</strong><small>{formatDateTime(event.at)}</small></div>
+                {/each}
+              </div>
+            </section>
+          </div>
+        {/if}
       {:else}
         <div class="empty-state"><button onclick={addClient}><Plus size={16} /> Create Client</button></div>
       {/if}

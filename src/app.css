@@ -586,6 +586,129 @@ textarea {
   color: #fffdf8;
 }
 
+.client-summary {
+  margin-bottom: 14px;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(360px, 1.4fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid #ded8ca;
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.client-summary h2 {
+  font-size: clamp(1.35rem, 2vw, 1.8rem);
+}
+
+.client-summary p {
+  margin-top: 4px;
+  color: #65706c;
+}
+
+.summary-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.summary-metrics div {
+  padding: 10px;
+  border-radius: 8px;
+  background: #f7f3ea;
+}
+
+.summary-metrics span,
+.summary-metrics strong {
+  display: block;
+}
+
+.summary-metrics span {
+  color: #65706c;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.summary-metrics strong {
+  margin-top: 4px;
+  font-size: 1.05rem;
+}
+
+.client-tabs {
+  margin-bottom: 14px;
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #ded8ca;
+}
+
+.client-tabs button {
+  min-height: 40px;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: #4a5551;
+}
+
+.client-tabs button:hover,
+.client-tabs button.active {
+  background: #fffdf8;
+  color: #1d2525;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.overview-panel,
+.tab-panel {
+  padding: 16px;
+  border: 1px solid #ded8ca;
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.recent-activity-compact {
+  margin-top: 14px;
+}
+
+.mini-card-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.mini-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f7f3ea;
+}
+
+.mini-card h3,
+.mini-card small {
+  display: block;
+}
+
+.mini-card .actions {
+  justify-content: flex-end;
+}
+
+.list-tools {
+  margin: 14px 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 160px 160px;
+  gap: 10px;
+}
+
+.activity-list.compact {
+  margin-top: 10px;
+}
+
 .record-header p {
   color: #c9d8d5;
   margin-top: 4px;
@@ -934,6 +1057,8 @@ textarea {
   .split,
   .work-area,
   .billing-layout,
+  .client-summary,
+  .overview-grid,
   .record-header {
     display: grid;
     grid-template-columns: 1fr;
@@ -943,6 +1068,8 @@ textarea {
   .period-grid,
   .period-grid.compact,
   .pdf-grid,
+  .summary-metrics,
+  .list-tools,
   .form-grid,
   .template-picker {
     grid-template-columns: 1fr;
@@ -984,6 +1111,14 @@ textarea {
   .clear-input {
     width: 100%;
     min-width: 0;
+  }
+
+  .client-tabs {
+    overflow-x: auto;
+  }
+
+  .mini-card {
+    grid-template-columns: 1fr;
   }
 
   .wizard-steps {
