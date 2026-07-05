@@ -1,4 +1,4 @@
-# Contractor Paperwork Kit
+# Axora
 
 A local-first SvelteKit SPA for freelancers and contractors to manage clients, timesheets, and invoices without accounts, cookies, backend services, cloud storage, or a database.
 
