@@ -111,6 +111,28 @@ nav button.active {
   background: #2b3a38;
 }
 
+.nav-group {
+  display: grid;
+  gap: 6px;
+}
+
+.client-nav {
+  display: grid;
+  gap: 4px;
+  padding-left: 18px;
+}
+
+.client-nav button {
+  min-height: 32px;
+  padding: 0 10px;
+  color: #b8c8c4;
+  font-size: 0.9rem;
+}
+
+.client-nav button.active {
+  color: #f7f4ec;
+}
+
 main {
   min-width: 0;
   padding: 22px clamp(18px, 3vw, 34px) 40px;
@@ -315,6 +337,10 @@ small {
   margin-bottom: 18px;
 }
 
+.period-grid.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .period-card {
   min-height: 210px;
   display: grid;
@@ -324,6 +350,14 @@ small {
   border: 1px solid #ded8ca;
   border-radius: 8px;
   background: #fffdf8;
+}
+
+.period-card.client-overview {
+  min-height: 180px;
+}
+
+.invoice-card {
+  min-height: 190px;
 }
 
 .period-card h3 {
@@ -341,6 +375,10 @@ small {
 
 .period-metrics b {
   font-size: 1.25rem;
+}
+
+.period-metrics span {
+  color: #4a5551;
 }
 
 .split {
@@ -786,6 +824,22 @@ textarea {
   border-top: 1px solid #e6dfd3;
 }
 
+.client-workspace {
+  max-width: 1320px;
+}
+
+.focus-panel {
+  padding: 18px;
+  border: 1px solid #ded8ca;
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.danger-zone {
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
 .workflow-section h3 {
   margin-bottom: 12px;
 }
@@ -887,6 +941,7 @@ textarea {
 
   .dashboard-grid,
   .period-grid,
+  .period-grid.compact,
   .pdf-grid,
   .form-grid,
   .template-picker {
