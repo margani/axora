@@ -48,7 +48,7 @@
     todayIso
   } from '$lib/workspace';
 
-  type View = 'dashboard' | 'clients' | 'settings';
+  type View = 'dashboard' | 'clients' | 'settings' | 'timesheetDetail' | 'invoiceDetail';
   type ClientTab = 'overview' | 'timesheets' | 'invoices' | 'notes' | 'settings';
   type SortOrder = 'newest' | 'oldest';
 
@@ -56,6 +56,7 @@
   let activeView: View = 'dashboard';
   let selectedClientId = '';
   let selectedPeriodId = '';
+  let selectedInvoiceId = '';
   let lastSaved = '';
   let saveStatus: 'saved' | 'saving' | 'unsaved' = 'saved';
   let ready = false;
@@ -78,7 +79,7 @@
   $: selectedClientPeriods = selectedClient ? clientPeriods(selectedClient.id) : [];
   $: selectedPeriod = selectedClientPeriods.find((period) => period.id === selectedPeriodId) ?? selectedClientPeriods[0];
   $: selectedTimesheet = selectedPeriod ? periodTimesheet(selectedPeriod) : undefined;
-  $: selectedInvoice = selectedPeriod ? periodInvoice(selectedPeriod) : undefined;
+  $: selectedInvoice = selectedInvoiceId ? workspace.invoices.find((invoice) => invoice.id === selectedInvoiceId) : selectedPeriod ? periodInvoice(selectedPeriod) : undefined;
   $: totalOutstanding = workspace.invoices
     .filter((invoice) => !invoice.archived && invoice.status !== 'paid' && invoice.status !== 'void')
     .reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
@@ -100,13 +101,34 @@
   $: filteredClientInvoices = selectedClient ? filteredInvoices(selectedClient.id) : [];
   $: searchResults = buildSearchResults(searchQuery);
 
-  const viewPaths: Record<View, string> = {
+  const viewPaths: Record<'dashboard' | 'clients' | 'settings', string> = {
     dashboard: '/',
     clients: '/clients',
     settings: '/settings'
   };
 
   function viewFromPath(pathname: string): View {
+    const parts = pathname.split('/').filter(Boolean);
+    if (parts[0] === 'clients' && parts[1]) {
+      const client = workspace.clients.find((item) => slugify(item.name || item.id) === parts[1] || item.id === parts[1]);
+      if (client) {
+        selectedClientId = client.id;
+        if (parts[2] === 'timesheets' && parts[3]) {
+          const period = clientPeriods(client.id).find((item) => periodSlug(item) === parts[3] || item.id === parts[3]);
+          selectedPeriodId = period?.id ?? clientPeriods(client.id)[0]?.id ?? '';
+          return 'timesheetDetail';
+        }
+        if (parts[2] === 'invoices' && parts[3]) {
+          const invoice = clientInvoices(client.id).find((item) => invoiceSlug(item) === parts[3] || item.id === parts[3]);
+          selectedInvoiceId = invoice?.id ?? '';
+          selectedPeriodId = workspace.billingPeriods.find((period) => period.invoiceId === invoice?.id)?.id ?? clientPeriods(client.id)[0]?.id ?? '';
+          return 'invoiceDetail';
+        }
+        selectedInvoiceId = '';
+        selectedPeriodId = clientPeriods(client.id)[0]?.id ?? '';
+        return 'clients';
+      }
+    }
     const found = Object.entries(viewPaths).find(([, path]) => path === pathname);
     return (found?.[0] as View | undefined) ?? 'dashboard';
   }
@@ -151,15 +173,30 @@
   function switchView(view: View, push = true) {
     activeView = view;
     message = '';
-    const path = viewPaths[view];
+    const path = view === 'timesheetDetail' || view === 'invoiceDetail' ? window.location.pathname : viewPaths[view];
     if (push && window.location.pathname !== path) history.pushState({}, '', path);
   }
 
   function openClient(clientId: string) {
     selectedClientId = clientId;
     selectedPeriodId = clientPeriods(clientId)[0]?.id ?? '';
+    selectedInvoiceId = '';
     clientTab = 'overview';
-    switchView('clients');
+    activeView = 'clients';
+    const client = workspace.clients.find((item) => item.id === clientId);
+    const path = client ? `/clients/${slugify(client.name || client.id)}` : '/clients';
+    if (window.location.pathname !== path) history.pushState({}, '', path);
+    message = '';
+  }
+
+  function slugify(value: string) {
+    return (
+      value
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'item'
+    );
   }
 
   function clientPeriods(clientId: string) {
@@ -182,6 +219,28 @@
 
   function periodTitle(period: BillingPeriod) {
     return `${monthName(period.month)} ${period.year}`;
+  }
+
+  function periodSlug(period: BillingPeriod) {
+    return slugify(periodTitle(period));
+  }
+
+  function invoiceSlug(invoice: Invoice) {
+    return slugify(invoice.invoiceNumber || invoice.id);
+  }
+
+  function clientPath(client: Client) {
+    return `/clients/${slugify(client.name || client.id)}`;
+  }
+
+  function timesheetPath(period: BillingPeriod) {
+    const client = workspace.clients.find((item) => item.id === period.clientId);
+    return `${client ? clientPath(client) : '/clients/client'}/timesheets/${periodSlug(period)}`;
+  }
+
+  function invoicePath(invoice: Invoice) {
+    const client = workspace.clients.find((item) => item.id === invoice.clientId);
+    return `${client ? clientPath(client) : '/clients/client'}/invoices/${invoiceSlug(invoice)}`;
   }
 
   function periodHours(period: BillingPeriod) {
@@ -279,13 +338,23 @@
   }
 
   function openPeriod(period: BillingPeriod) {
+    selectedClientId = period.clientId;
     selectedPeriodId = period.id;
-    clientTab = 'timesheets';
+    selectedInvoiceId = '';
+    activeView = 'timesheetDetail';
+    const path = timesheetPath(period);
+    if (window.location.pathname !== path) history.pushState({}, '', path);
+    message = `Opened ${periodTitle(period)} Timesheet`;
   }
 
   function openInvoice(invoice: Invoice) {
+    selectedClientId = invoice.clientId;
+    selectedInvoiceId = invoice.id;
     selectedPeriodId = workspace.billingPeriods.find((period) => period.invoiceId === invoice.id)?.id ?? selectedPeriodId;
-    clientTab = 'invoices';
+    activeView = 'invoiceDetail';
+    const path = invoicePath(invoice);
+    if (window.location.pathname !== path) history.pushState({}, '', path);
+    message = `Opened Invoice ${invoice.invoiceNumber}`;
   }
 
   function createInvoiceForClient(client: Client) {
@@ -529,12 +598,11 @@
     } else if (result.type === 'Timesheet') {
       const period = workspace.billingPeriods.find((item) => item.id === result.id);
       if (period) {
-        selectedPeriodId = period.id;
-        openClient(period.clientId);
+        openPeriod(period);
       }
     } else {
       const invoice = workspace.invoices.find((item) => item.id === result.id);
-      if (invoice) openClient(invoice.clientId);
+      if (invoice) openInvoice(invoice);
     }
   }
 </script>
@@ -559,13 +627,13 @@
         <span>Dashboard</span>
       </button>
       <div class="nav-group">
-        <button class:active={activeView === 'clients'} onclick={() => switchView('clients')}>
+        <button class:active={activeView === 'clients' || activeView === 'timesheetDetail' || activeView === 'invoiceDetail'} onclick={() => switchView('clients')}>
           <BriefcaseBusiness size={18} />
           <span>Clients</span>
         </button>
         <div class="client-nav">
           {#each workspace.clients as client}
-            <button class:active={activeView === 'clients' && selectedClientId === client.id} onclick={() => openClient(client.id)}>
+            <button class:active={(activeView === 'clients' || activeView === 'timesheetDetail' || activeView === 'invoiceDetail') && selectedClientId === client.id} onclick={() => openClient(client.id)}>
               <span>{client.name || 'Untitled client'}</span>
             </button>
           {/each}
@@ -581,7 +649,19 @@
   <main>
     <header class="topbar">
       <div>
-        <h1>{activeView === 'clients' ? selectedClient?.name || 'Clients' : activeView === 'dashboard' ? 'Dashboard' : 'Settings'}</h1>
+        <h1>
+          {activeView === 'clients'
+            ? selectedClient?.name || 'Clients'
+            : activeView === 'timesheetDetail'
+              ? selectedPeriod
+                ? periodTitle(selectedPeriod)
+                : 'Timesheet'
+              : activeView === 'invoiceDetail'
+                ? selectedInvoice?.invoiceNumber || 'Invoice'
+                : activeView === 'dashboard'
+                  ? 'Dashboard'
+                  : 'Settings'}
+        </h1>
         <p>Last saved: {savedLabel()} <span class="save-status {saveStatus}">{saveStatusLabel()}</span></p>
       </div>
       <div class="top-actions">
@@ -765,31 +845,6 @@
                   </article>
                 {/each}
               </div>
-
-              {#if selectedPeriod && selectedTimesheet}
-                <section class="workflow-section focus-panel">
-                  <div class="section-title">
-                    <h2>{periodTitle(selectedPeriod)}</h2>
-                    <div class="actions">
-                      <button onclick={() => addEntry(selectedPeriod)}><Plus size={16} /> Add Hours</button>
-                      <button class="secondary" onclick={() => generateInvoiceForPeriod(selectedPeriod)}><ReceiptText size={16} /> Generate Invoice</button>
-                      <button class="secondary" onclick={() => generatePeriodPdf(selectedPeriod)}><Download size={16} /> PDF</button>
-                    </div>
-                  </div>
-                  <div class="entry-list" oninput={() => touch('Timesheet saved')}>
-                    {#each selectedTimesheet.entries as entry}
-                      <div class="entry-grid simple">
-                        <label>Date <input type="date" bind:value={entry.date} /></label>
-                        <label>Hours <input type="number" min="0" step="0.25" bind:value={entry.hours} /></label>
-                        <label class="check"><input type="checkbox" bind:checked={entry.billable} onchange={() => touch('Timesheet saved')} /> Billable</label>
-                        <label class="description">Description <input bind:value={entry.description} /></label>
-                        <span class="duration">{formatHours(Number(entry.hours || 0) * 60)}</span>
-                        <button class="icon danger-icon" onclick={() => removeEntry(selectedPeriod, entry.id)}><Trash2 size={16} /></button>
-                      </div>
-                    {/each}
-                  </div>
-                </section>
-              {/if}
             </section>
           {:else if clientTab === 'invoices'}
             <section class="tab-panel">
@@ -828,28 +883,6 @@
                   </article>
                 {/each}
               </div>
-
-              {#if selectedInvoice}
-                <section class="workflow-section focus-panel">
-                  <div class="invoice-summary">
-                    <strong>{selectedInvoice.invoiceNumber}</strong>
-                    <span>{selectedInvoice.status} · Due {selectedInvoice.dueDate}</span>
-                    <b>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</b>
-                  </div>
-                  <div class="entry-list" oninput={() => touch('Invoice saved')}>
-                    {#each selectedInvoice.items as item}
-                      <div class="item-grid">
-                        <label>Description <input bind:value={item.description} /></label>
-                        <label>Quantity <input type="number" min="0" step="0.01" bind:value={item.quantity} /></label>
-                        <label>Unit price <input type="number" min="0" step="0.01" bind:value={item.unitPrice} /></label>
-                        <span class="duration">{formatMoney(Number(item.quantity || 0) * Number(item.unitPrice || 0), selectedInvoice.currency)}</span>
-                        <button class="icon danger-icon" onclick={() => { selectedInvoice.items = selectedInvoice.items.filter((row) => row.id !== item.id); touch('Item removed'); }}><Trash2 size={16} /></button>
-                      </div>
-                    {/each}
-                    <button class="secondary" onclick={() => { selectedInvoice.items = [...selectedInvoice.items, emptyInvoiceItem()]; touch('Item added'); }}><Plus size={16} /> Add Invoice Item</button>
-                  </div>
-                </section>
-              {/if}
             </section>
           {:else if clientTab === 'notes'}
             <section class="tab-panel notes-panel">
@@ -903,6 +936,103 @@
         {/if}
       {:else}
         <div class="empty-state"><button onclick={addClient}><Plus size={16} /> Create Client</button></div>
+      {/if}
+    {:else if activeView === 'timesheetDetail'}
+      {#if selectedClient && selectedPeriod && selectedTimesheet}
+        <section class="detail-page">
+          <nav class="breadcrumb" aria-label="Breadcrumb">
+            <button onclick={() => openClient(selectedClient.id)}>{selectedClient.name || 'Client'}</button>
+            <span>&gt;</span>
+            <button onclick={() => { openClient(selectedClient.id); clientTab = 'timesheets'; }}>Timesheets</button>
+            <span>&gt;</span>
+            <strong>{periodTitle(selectedPeriod)}</strong>
+          </nav>
+          <div class="detail-header">
+            <div>
+              <h2>{periodTitle(selectedPeriod)}</h2>
+              <div class="record-meta">
+                <span>{formatHours(periodHours(selectedPeriod))}</span>
+                <span>{formatMoney(periodValue(selectedPeriod), periodCurrency(selectedPeriod))}</span>
+                <span>{selectedTimesheet.currency} · {formatMoney(selectedTimesheet.hourlyRate, selectedTimesheet.currency)}/h</span>
+              </div>
+            </div>
+            <div class="actions">
+              <button class="secondary" onclick={() => generatePeriodPdf(selectedPeriod)}><Download size={16} /> PDF</button>
+              <button onclick={() => generateInvoiceForPeriod(selectedPeriod)}><ReceiptText size={16} /> Generate Invoice</button>
+              <button class="secondary" onclick={() => duplicateTimesheetPeriod(selectedPeriod)}><Copy size={16} /> Duplicate</button>
+              <button class="secondary" onclick={() => archivePeriod(selectedPeriod)}><Archive size={16} /> Archive</button>
+            </div>
+          </div>
+          <section class="detail-editor">
+            <div class="section-title">
+              <h2>Entries</h2>
+              <button onclick={() => addEntry(selectedPeriod)}><Plus size={16} /> Add Hours</button>
+            </div>
+            <div class="entry-list" oninput={() => touch('Timesheet saved')}>
+              {#each selectedTimesheet.entries as entry}
+                <div class="entry-grid simple">
+                  <label>Date <input type="date" bind:value={entry.date} /></label>
+                  <label>Hours <input type="number" min="0" step="0.25" bind:value={entry.hours} /></label>
+                  <label class="check"><input type="checkbox" bind:checked={entry.billable} onchange={() => touch('Timesheet saved')} /> Billable</label>
+                  <label class="description">Description <input bind:value={entry.description} /></label>
+                  <span class="duration">{formatHours(Number(entry.hours || 0) * 60)}</span>
+                  <button class="icon danger-icon" onclick={() => removeEntry(selectedPeriod, entry.id)}><Trash2 size={16} /></button>
+                </div>
+              {/each}
+            </div>
+          </section>
+        </section>
+      {:else}
+        <div class="empty-state">Timesheet not found.</div>
+      {/if}
+    {:else if activeView === 'invoiceDetail'}
+      {#if selectedClient && selectedInvoice}
+        <section class="detail-page">
+          <nav class="breadcrumb" aria-label="Breadcrumb">
+            <button onclick={() => openClient(selectedClient.id)}>{selectedClient.name || 'Client'}</button>
+            <span>&gt;</span>
+            <button onclick={() => { openClient(selectedClient.id); clientTab = 'invoices'; }}>Invoices</button>
+            <span>&gt;</span>
+            <strong>{selectedInvoice.invoiceNumber}</strong>
+          </nav>
+          <div class="detail-header">
+            <div>
+              <h2>{selectedInvoice.invoiceNumber}</h2>
+              <div class="record-meta">
+                <span>{selectedInvoice.status}</span>
+                <span>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</span>
+                <span>Due {selectedInvoice.dueDate}</span>
+              </div>
+            </div>
+            <div class="actions">
+              <button class="secondary" onclick={() => generateInvoicePdfOnly(selectedInvoice)}><Download size={16} /> PDF</button>
+              <button class="secondary" onclick={() => duplicateInvoiceForClient(selectedInvoice)}><Copy size={16} /> Duplicate</button>
+              <button onclick={() => markInvoicePaid(selectedInvoice)}><CheckCircle2 size={16} /> Mark Paid</button>
+              <button class="secondary" onclick={() => archiveInvoiceForClient(selectedInvoice)}><Archive size={16} /> Archive</button>
+            </div>
+          </div>
+          <section class="detail-editor">
+            <div class="invoice-summary">
+              <strong>{selectedInvoice.invoiceNumber}</strong>
+              <span>{selectedInvoice.status} · Issue {selectedInvoice.issueDate} · Due {selectedInvoice.dueDate}</span>
+              <b>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</b>
+            </div>
+            <div class="entry-list" oninput={() => touch('Invoice saved')}>
+              {#each selectedInvoice.items as item}
+                <div class="item-grid">
+                  <label>Description <input bind:value={item.description} /></label>
+                  <label>Quantity <input type="number" min="0" step="0.01" bind:value={item.quantity} /></label>
+                  <label>Unit price <input type="number" min="0" step="0.01" bind:value={item.unitPrice} /></label>
+                  <span class="duration">{formatMoney(Number(item.quantity || 0) * Number(item.unitPrice || 0), selectedInvoice.currency)}</span>
+                  <button class="icon danger-icon" onclick={() => { selectedInvoice.items = selectedInvoice.items.filter((row) => row.id !== item.id); touch('Item removed'); }}><Trash2 size={16} /></button>
+                </div>
+              {/each}
+              <button class="secondary" onclick={() => { selectedInvoice.items = [...selectedInvoice.items, emptyInvoiceItem()]; touch('Item added'); }}><Plus size={16} /> Add Invoice Item</button>
+            </div>
+          </section>
+        </section>
+      {:else}
+        <div class="empty-state">Invoice not found.</div>
       {/if}
     {:else if activeView === 'settings'}
       <section class="editor full">
