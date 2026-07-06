@@ -555,6 +555,12 @@
     return new Date(value).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
   }
 
+  function templateLabel(value: string) {
+    if (value === 'modern') return 'Modern';
+    if (value === 'compact') return 'Compact';
+    return 'Classic';
+  }
+
   function buildSearchResults(query: string) {
     const needle = query.trim().toLowerCase();
     if (!needle) return [];
@@ -905,6 +911,7 @@
                 <label>Payment Terms <input type="number" min="0" bind:value={selectedClient.defaultPaymentTermsDays} /></label>
                 <label>Invoice Template
                   <select bind:value={selectedClient.defaultInvoiceTemplate}>
+                    <option value="">Use workspace default ({templateLabel(workspace.settings.invoiceTemplate)})</option>
                     <option value="classic">Classic</option>
                     <option value="modern">Modern</option>
                     <option value="compact">Compact</option>
@@ -1001,6 +1008,7 @@
               <div class="record-meta">
                 <span>{selectedInvoice.status}</span>
                 <span>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</span>
+                <span>Template: {templateLabel(selectedInvoice.template)}</span>
                 <span>Due {selectedInvoice.dueDate}</span>
               </div>
             </div>
@@ -1014,8 +1022,17 @@
           <section class="detail-editor">
             <div class="invoice-summary">
               <strong>{selectedInvoice.invoiceNumber}</strong>
-              <span>{selectedInvoice.status} · Issue {selectedInvoice.issueDate} · Due {selectedInvoice.dueDate}</span>
+              <span>{selectedInvoice.status} · Template: {templateLabel(selectedInvoice.template)} · Issue {selectedInvoice.issueDate} · Due {selectedInvoice.dueDate}</span>
               <b>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</b>
+            </div>
+            <div class="form-grid invoice-options" oninput={() => touch('Invoice saved')}>
+              <label>Invoice Template
+                <select bind:value={selectedInvoice.template}>
+                  <option value="classic">Classic</option>
+                  <option value="modern">Modern</option>
+                  <option value="compact">Compact</option>
+                </select>
+              </label>
             </div>
             <div class="entry-list" oninput={() => touch('Invoice saved')}>
               {#each selectedInvoice.items as item}
@@ -1051,6 +1068,13 @@
           <label>Account number <input bind:value={workspace.profile.accountNumber} /></label>
           <label>IBAN <input bind:value={workspace.profile.iban} /></label>
           <label>Default currency <input bind:value={workspace.settings.currency} /></label>
+          <label>Workspace Default Template
+            <select bind:value={workspace.settings.invoiceTemplate}>
+              <option value="classic">Classic</option>
+              <option value="modern">Modern</option>
+              <option value="compact">Compact</option>
+            </select>
+          </label>
         </div>
         <div class="settings-block">
           <h3>Company logo</h3>

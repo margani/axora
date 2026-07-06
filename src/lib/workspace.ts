@@ -35,8 +35,12 @@ export function clientDefaults(client: Client | undefined, workspace: Workspace)
     hourlyRate: Number(client?.defaultHourlyRate || 500),
     currency: client?.defaultCurrency || workspace.settings.currency || 'GBP',
     paymentTermsDays: Number(client?.defaultPaymentTermsDays || workspace.profile.paymentTermsDays || 14),
-    invoiceTemplate: client?.defaultInvoiceTemplate || workspace.settings.invoiceTemplate || 'classic'
+    invoiceTemplate: isInvoiceTemplate(client?.defaultInvoiceTemplate) ? client.defaultInvoiceTemplate : workspace.settings.invoiceTemplate || 'classic'
   };
+}
+
+function isInvoiceTemplate(value: unknown): value is InvoiceTemplate {
+  return value === 'classic' || value === 'modern' || value === 'compact';
 }
 
 export function monthName(month: number) {
@@ -66,7 +70,7 @@ export function emptyClient(): Client {
     defaultHourlyRate: 500,
     defaultCurrency: 'GBP',
     defaultPaymentTermsDays: 14,
-    defaultInvoiceTemplate: 'classic',
+    defaultInvoiceTemplate: '',
     defaultServiceDescription: 'Professional services'
   };
 }
@@ -336,7 +340,7 @@ export function normalizeWorkspace(value: unknown): Workspace {
     activity: Array.isArray(source.activity) ? source.activity.map(normalizeActivity) : [],
     settings: {
       currency: source.settings?.currency ?? 'GBP',
-      invoiceTemplate: source.settings?.invoiceTemplate ?? 'classic',
+      invoiceTemplate: isInvoiceTemplate(source.settings?.invoiceTemplate) ? source.settings.invoiceTemplate : 'classic',
       companyLogo: source.settings?.companyLogo ?? ''
     }
   };
@@ -354,7 +358,7 @@ function normalizeClient(client: Partial<Client>): Client {
     defaultHourlyRate: Number(client.defaultHourlyRate || 500),
     defaultCurrency: client.defaultCurrency || 'GBP',
     defaultPaymentTermsDays: Number(client.defaultPaymentTermsDays || 14),
-    defaultInvoiceTemplate: client.defaultInvoiceTemplate || 'classic',
+    defaultInvoiceTemplate: isInvoiceTemplate(client.defaultInvoiceTemplate) ? client.defaultInvoiceTemplate : '',
     defaultServiceDescription: client.defaultServiceDescription || 'Professional services',
     notes: client.notes || '',
     notesUpdatedAt: client.notesUpdatedAt || ''
