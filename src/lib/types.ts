@@ -33,7 +33,7 @@ export type Client = {
   defaultHourlyRate: number;
   defaultCurrency: Currency;
   defaultPaymentTermsDays: number;
-  defaultInvoiceTemplate: InvoiceTemplate;
+  defaultInvoiceTemplate: InvoiceTemplate | '';
   defaultServiceDescription: string;
 };
 
