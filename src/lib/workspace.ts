@@ -97,6 +97,7 @@ export function emptyTimesheetEntry(): TimesheetEntry {
     id: uid('entry'),
     date: todayIso(),
     hours: 0,
+    timeTrackingMode: 'duration',
     startTime: '09:00',
     endTime: '17:30',
     breakMinutes: 30,
@@ -229,6 +230,7 @@ export function sampleWorkspace(): Workspace {
             id: uid('entry'),
             date: '2026-06-03',
             hours: 8,
+            timeTrackingMode: 'duration',
             startTime: '09:00',
             endTime: '17:30',
             breakMinutes: 30,
@@ -239,6 +241,7 @@ export function sampleWorkspace(): Workspace {
             id: uid('entry'),
             date: '2026-06-04',
             hours: 7,
+            timeTrackingMode: 'duration',
             startTime: '09:15',
             endTime: '16:45',
             breakMinutes: 30,
@@ -249,6 +252,7 @@ export function sampleWorkspace(): Workspace {
             id: uid('entry'),
             date: '2026-06-05',
             hours: 2,
+            timeTrackingMode: 'duration',
             startTime: '10:00',
             endTime: '12:00',
             breakMinutes: 0,
@@ -366,24 +370,29 @@ function normalizeClient(client: Partial<Client>): Client {
 }
 
 function normalizeTimesheet(timesheet: Partial<Timesheet>): Timesheet {
+  const entryMode = timesheet.entryMode === 'detailed' ? 'detailed' : 'simple';
   return {
     ...emptyTimesheet(),
     ...timesheet,
-    entryMode: timesheet.entryMode === 'detailed' ? 'detailed' : 'simple',
+    entryMode,
     archived: Boolean(timesheet.archived),
     lastPdfGeneratedAt: timesheet.lastPdfGeneratedAt ?? '',
-    entries: Array.isArray(timesheet.entries) ? timesheet.entries.map(normalizeTimesheetEntry) : []
+    entries: Array.isArray(timesheet.entries) ? timesheet.entries.map((entry) => normalizeTimesheetEntry(entry, entryMode)) : []
   };
 }
 
-function normalizeTimesheetEntry(entry: Partial<TimesheetEntry>): TimesheetEntry {
-  return {
+function normalizeTimesheetEntry(entry: Partial<TimesheetEntry>, parentMode: TimesheetEntryMode = 'simple'): TimesheetEntry {
+  const timeTrackingMode = entry.timeTrackingMode === 'time' || (!entry.timeTrackingMode && parentMode === 'detailed') ? 'time' : 'duration';
+  const normalized: TimesheetEntry = {
     ...emptyTimesheetEntry(),
     ...entry,
     hours: Number(entry.hours || 0),
+    timeTrackingMode,
     breakMinutes: Number(entry.breakMinutes || 0),
     billable: entry.billable ?? true
   };
+  if (normalized.timeTrackingMode === 'time') syncEntryDurationFromTime(normalized);
+  return normalized;
 }
 
 function normalizeInvoice(invoice: Partial<Invoice>): Invoice {
@@ -547,14 +556,25 @@ export function invoiceFromTimesheet(timesheet: Timesheet, invoiceNumber: string
   };
 }
 
-export function entryMinutes(entry: TimesheetEntry, mode: TimesheetEntryMode = 'simple') {
-  if (mode === 'simple' && Number(entry.hours || 0) > 0) return Math.round(Number(entry.hours || 0) * 60);
+export function calculateTimeEntryMinutes(entry: TimesheetEntry) {
   const [startHour, startMinute] = entry.startTime.split(':').map(Number);
   const [endHour, endMinute] = entry.endTime.split(':').map(Number);
   if ([startHour, startMinute, endHour, endMinute].some((part) => Number.isNaN(part))) return 0;
-  let minutes = endHour * 60 + endMinute - (startHour * 60 + startMinute) - Number(entry.breakMinutes || 0);
-  if (minutes < 0) minutes += 24 * 60;
-  return Math.max(0, minutes);
+  return endHour * 60 + endMinute - (startHour * 60 + startMinute) - Number(entry.breakMinutes || 0);
+}
+
+export function syncEntryDurationFromTime(entry: TimesheetEntry) {
+  const minutes = calculateTimeEntryMinutes(entry);
+  entry.hours = minutes > 0 ? Number((minutes / 60).toFixed(2)) : 0;
+  return minutes;
+}
+
+export function entryMinutes(entry: TimesheetEntry, _mode: TimesheetEntryMode = 'simple') {
+  return Math.max(0, Math.round(Number(entry.hours || 0) * 60));
+}
+
+export function entryTimeLabel(entry: TimesheetEntry) {
+  return entry.timeTrackingMode === 'time' && entry.startTime && entry.endTime ? `${entry.startTime}-${entry.endTime}` : '-';
 }
 
 export function billableMinutes(timesheet: Timesheet) {

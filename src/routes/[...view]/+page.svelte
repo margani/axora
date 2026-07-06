@@ -16,12 +16,13 @@
     Trash2,
     Upload
   } from '@lucide/svelte';
-  import type { ActivityEvent, BillingPeriod, Client, Invoice, Workspace } from '$lib/types';
+  import type { ActivityEvent, BillingPeriod, Client, Invoice, TimesheetEntry, Workspace } from '$lib/types';
   import { generateInvoicePdf, generateTimesheetPdf } from '$lib/pdf';
   import {
     activity,
     addDays,
     billableMinutes,
+    calculateTimeEntryMinutes,
     clientDefaults,
     clearWorkspace,
     clientName,
@@ -44,6 +45,8 @@
     normalizeWorkspace,
     sampleWorkspace,
     saveWorkspace,
+    syncEntryDurationFromTime,
+    entryMinutes,
     timesheetTotal,
     todayIso
   } from '$lib/workspace';
@@ -463,6 +466,47 @@
     if (!timesheet) return;
     timesheet.entries = timesheet.entries.filter((entry) => entry.id !== entryId);
     touch('Entry removed');
+  }
+
+  function eventChecked(event: Event) {
+    return (event.currentTarget as HTMLInputElement).checked;
+  }
+
+  function setEntryTimeMode(entry: TimesheetEntry, useTime: boolean) {
+    entry.timeTrackingMode = useTime ? 'time' : 'duration';
+    if (useTime && !timeEntryError(entry)) syncEntryDurationFromTime(entry);
+    touch('Timesheet saved');
+  }
+
+  function updateEntryTiming(entry: TimesheetEntry) {
+    if (!timeEntryError(entry)) syncEntryDurationFromTime(entry);
+    touch('Timesheet saved');
+  }
+
+  function timeValue(value: string) {
+    const [hour, minute] = value.split(':').map(Number);
+    return Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : Number.NaN;
+  }
+
+  function timeEntryError(entry: TimesheetEntry) {
+    if (entry.timeTrackingMode !== 'time') return '';
+    const start = timeValue(entry.startTime);
+    const end = timeValue(entry.endTime);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return 'Enter a start and end time.';
+    if (end <= start) return 'End time must be after start time.';
+    if (Number(entry.breakMinutes || 0) < 0) return 'Break minutes cannot be negative.';
+    if (calculateTimeEntryMinutes(entry) <= 0) return 'Break minutes cannot make the duration zero or negative.';
+    return '';
+  }
+
+  function calculatedEntryDuration(entry: TimesheetEntry) {
+    const minutes = calculateTimeEntryMinutes(entry);
+    return minutes > 0 ? formatHours(minutes) : '0.00h';
+  }
+
+  function entryDurationSummary(entry: TimesheetEntry) {
+    const duration = formatHours(entryMinutes(entry));
+    return entry.timeTrackingMode === 'time' && entry.startTime && entry.endTime ? `${entry.startTime}–${entry.endTime} · ${duration}` : duration;
   }
 
   function updateClientNotes(client: Client) {
@@ -977,12 +1021,29 @@
             </div>
             <div class="entry-list" oninput={() => touch('Timesheet saved')}>
               {#each selectedTimesheet.entries as entry}
-                <div class="entry-grid simple">
+                <div class:time-entry={entry.timeTrackingMode === 'time'} class="entry-grid">
                   <label>Date <input type="date" bind:value={entry.date} /></label>
-                  <label>Hours <input type="number" min="0" step="0.25" bind:value={entry.hours} /></label>
+                  {#if entry.timeTrackingMode === 'time'}
+                    <label>Start <input type="time" bind:value={entry.startTime} oninput={() => updateEntryTiming(entry)} /></label>
+                    <label>End <input type="time" bind:value={entry.endTime} oninput={() => updateEntryTiming(entry)} /></label>
+                    <label>Break <input type="number" min="0" step="5" bind:value={entry.breakMinutes} oninput={() => updateEntryTiming(entry)} /></label>
+                    <div class:error={Boolean(timeEntryError(entry))} class="calculated-duration">
+                      <span>Duration</span>
+                      <strong>{calculatedEntryDuration(entry)}</strong>
+                      {#if timeEntryError(entry)}
+                        <small>{timeEntryError(entry)}</small>
+                      {/if}
+                    </div>
+                  {:else}
+                    <label>Hours <input type="number" min="0" step="0.25" bind:value={entry.hours} /></label>
+                  {/if}
                   <label class="check"><input type="checkbox" bind:checked={entry.billable} onchange={() => touch('Timesheet saved')} /> Billable</label>
                   <label class="description">Description <input bind:value={entry.description} /></label>
-                  <span class="duration">{formatHours(Number(entry.hours || 0) * 60)}</span>
+                  <label class="check time-toggle">
+                    <input type="checkbox" checked={entry.timeTrackingMode === 'time'} onchange={(event) => setEntryTimeMode(entry, eventChecked(event))} />
+                    Use start/end time
+                  </label>
+                  <span class="duration">{entryDurationSummary(entry)}</span>
                   <button class="icon danger-icon" onclick={() => removeEntry(selectedPeriod, entry.id)}><Trash2 size={16} /></button>
                 </div>
               {/each}

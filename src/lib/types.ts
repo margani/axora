@@ -41,6 +41,7 @@ export type TimesheetEntry = {
   id: string;
   date: string;
   hours: number;
+  timeTrackingMode: 'duration' | 'time';
   startTime: string;
   endTime: string;
   breakMinutes: number;

@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import type { Client, Invoice, Profile, Timesheet, Workspace } from './types';
-import { billableMinutes, entryMinutes, formatHours, formatMoney, invoiceTotal, monthName, timesheetTotal } from './workspace';
+import { billableMinutes, entryMinutes, entryTimeLabel, formatHours, formatMoney, invoiceTotal, monthName, timesheetTotal } from './workspace';
 
 type PdfContext = {
   doc: jsPDF;
@@ -94,9 +94,9 @@ export function generateTimesheetPdf(workspace: Workspace, timesheet: Timesheet)
       y = 20;
     }
     doc.text(entry.date, 16, y);
-    doc.text(timesheet.entryMode === 'detailed' ? `${entry.startTime}-${entry.endTime}` : '-', 45, y);
-    doc.text(timesheet.entryMode === 'detailed' ? String(entry.breakMinutes || 0) : '-', 82, y);
-    doc.text(formatHours(entryMinutes(entry, timesheet.entryMode)), 105, y);
+    doc.text(entryTimeLabel(entry), 45, y);
+    doc.text(entry.timeTrackingMode === 'time' ? String(entry.breakMinutes || 0) : '-', 82, y);
+    doc.text(formatHours(entryMinutes(entry)), 105, y);
     doc.text(entry.billable ? 'Yes' : 'No', 128, y);
     y = addWrapped(doc, entry.description, 154, y, 42, 5) + 2;
   }

@@ -770,11 +770,28 @@ textarea {
 }
 
 .entry-grid {
-  grid-template-columns: 145px 110px 110px 100px 105px minmax(180px, 1fr) 70px 40px;
+  grid-template-columns: 145px 110px 105px minmax(180px, 1fr) 160px 150px 40px;
 }
 
-.entry-grid.simple {
-  grid-template-columns: 145px 110px 105px minmax(220px, 1fr) 70px 40px;
+.entry-grid.time-entry {
+  grid-template-columns: 145px 105px 105px 95px 125px 105px 40px;
+}
+
+.entry-grid.time-entry .description {
+  grid-column: 1 / span 4;
+}
+
+.entry-grid.time-entry .time-toggle {
+  grid-column: 5 / span 2;
+}
+
+.entry-grid.time-entry .duration {
+  grid-column: 7;
+}
+
+.entry-grid.time-entry .danger-icon {
+  grid-column: 7;
+  grid-row: 1;
 }
 
 .item-grid {
@@ -798,6 +815,33 @@ textarea {
   display: flex;
   align-items: center;
   font-weight: 750;
+}
+
+.calculated-duration {
+  min-height: 40px;
+  display: grid;
+  gap: 2px;
+  align-content: center;
+}
+
+.calculated-duration span {
+  color: #6d665a;
+  font-size: 0.78rem;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.calculated-duration strong {
+  color: #23322f;
+}
+
+.calculated-duration small {
+  color: #a43d2a;
+  font-weight: 650;
+}
+
+.calculated-duration.error strong {
+  color: #a43d2a;
 }
 
 .notes {
@@ -1146,12 +1190,14 @@ textarea {
   }
 
   .entry-grid,
-  .entry-grid.simple,
+  .entry-grid.time-entry,
   .item-grid {
     grid-template-columns: 1fr 1fr;
   }
 
   .description,
+  .entry-grid.time-entry .description,
+  .entry-grid.time-entry .time-toggle,
   .item-grid label:first-child,
   .duration {
     grid-column: 1 / -1;
@@ -1168,7 +1214,7 @@ textarea {
   }
 
   .entry-grid,
-  .entry-grid.simple,
+  .entry-grid.time-entry,
   .item-grid {
     grid-template-columns: 1fr;
   }
