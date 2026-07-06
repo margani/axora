@@ -26,6 +26,23 @@ function findClient(workspace: Workspace, clientId: string) {
   return workspace.clients.find((client) => client.id === clientId);
 }
 
+function imageFormat(dataUrl: string) {
+  if (dataUrl.startsWith('data:image/png')) return 'PNG';
+  if (dataUrl.startsWith('data:image/jpeg') || dataUrl.startsWith('data:image/jpg')) return 'JPEG';
+  if (dataUrl.startsWith('data:image/svg+xml')) return 'SVG';
+  return 'PNG';
+}
+
+function addLogo(doc: jsPDF, workspace: Workspace, x: number, y: number, width = 30) {
+  const logo = workspace.settings.companyLogo;
+  if (!logo) return;
+  try {
+    doc.addImage(logo, imageFormat(logo), x, y, width, 0);
+  } catch {
+    // Keep PDF generation resilient if a browser cannot render a provided image format.
+  }
+}
+
 function companyBlock(doc: jsPDF, profile: Profile, x: number, y: number) {
   doc.setFontSize(10);
   doc.text(profile.companyName, x, y);
@@ -77,9 +94,9 @@ export function generateTimesheetPdf(workspace: Workspace, timesheet: Timesheet)
       y = 20;
     }
     doc.text(entry.date, 16, y);
-    doc.text(`${entry.startTime}-${entry.endTime}`, 45, y);
-    doc.text(String(entry.breakMinutes || 0), 82, y);
-    doc.text(formatHours(entryMinutes(entry)), 105, y);
+    doc.text(timesheet.entryMode === 'detailed' ? `${entry.startTime}-${entry.endTime}` : '-', 45, y);
+    doc.text(timesheet.entryMode === 'detailed' ? String(entry.breakMinutes || 0) : '-', 82, y);
+    doc.text(formatHours(entryMinutes(entry, timesheet.entryMode)), 105, y);
     doc.text(entry.billable ? 'Yes' : 'No', 128, y);
     y = addWrapped(doc, entry.description, 154, y, 42, 5) + 2;
   }
@@ -91,11 +108,12 @@ export function generateTimesheetPdf(workspace: Workspace, timesheet: Timesheet)
 }
 
 function renderClassicInvoice({ doc, workspace, client }: PdfContext, invoice: Invoice) {
+  addLogo(doc, workspace, 16, 10, 24);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(24);
-  doc.text('Invoice', 16, 20);
+  doc.text('Invoice', workspace.settings.companyLogo ? 46 : 16, 20);
   doc.setFontSize(12);
-  doc.text(invoice.invoiceNumber, 16, 30);
+  doc.text(invoice.invoiceNumber, workspace.settings.companyLogo ? 46 : 16, 30);
   companyBlock(doc, workspace.profile, 130, 20);
   doc.setFont('helvetica', 'bold');
   doc.text('Bill to', 16, 50);
@@ -111,12 +129,13 @@ function renderClassicInvoice({ doc, workspace, client }: PdfContext, invoice: I
 function renderModernInvoice({ doc, workspace, client }: PdfContext, invoice: Invoice) {
   doc.setFillColor(24, 31, 42);
   doc.rect(0, 0, 210, 52, 'F');
+  addLogo(doc, workspace, 16, 11, 22);
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(26);
-  doc.text(workspace.profile.companyName || 'Invoice', 16, 22);
+  doc.text(workspace.profile.companyName || 'Invoice', workspace.settings.companyLogo ? 44 : 16, 22);
   doc.setFontSize(11);
-  doc.text(`Invoice ${invoice.invoiceNumber}`, 16, 36);
+  doc.text(`Invoice ${invoice.invoiceNumber}`, workspace.settings.companyLogo ? 44 : 16, 36);
   doc.text(`Due ${invoice.dueDate}`, 160, 36);
   doc.setTextColor(0, 0, 0);
   doc.setFontSize(12);
@@ -133,9 +152,10 @@ function renderModernInvoice({ doc, workspace, client }: PdfContext, invoice: In
 }
 
 function renderCompactInvoice({ doc, workspace, client }: PdfContext, invoice: Invoice) {
+  addLogo(doc, workspace, 12, 7, 16);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
-  doc.text(`${workspace.profile.companyName} / ${invoice.invoiceNumber}`, 12, 15);
+  doc.text(`${workspace.profile.companyName} / ${invoice.invoiceNumber}`, workspace.settings.companyLogo ? 34 : 12, 15);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.text(`Client: ${client?.name ?? 'No client selected'}`, 12, 24);
