@@ -589,7 +589,7 @@ textarea {
 .client-summary {
   margin-bottom: 14px;
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(360px, 1.4fr) auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(360px, 1.4fr);
   gap: 16px;
   align-items: center;
   padding: 16px;

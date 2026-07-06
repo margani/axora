@@ -656,11 +656,6 @@
               <div><span>Revenue YTD</span><strong>{formatMoney(clientRevenueYtd(selectedClient.id), selectedClient.defaultCurrency)}</strong></div>
               <div><span>Hours YTD</span><strong>{formatHours(clientHoursYtd(selectedClient.id))}</strong></div>
             </div>
-            <div class="actions">
-              <button onclick={() => createTimesheetForClient(selectedClient)}><Plus size={16} /> New Timesheet</button>
-              <button class="secondary" onclick={() => createStandaloneInvoice(selectedClient)}><ReceiptText size={16} /> New Invoice</button>
-              <button class="secondary" onclick={() => createInvoiceForClient(selectedClient)}><ReceiptText size={16} /> Generate Invoice From Timesheet</button>
-            </div>
           </div>
 
           <div class="client-tabs" role="tablist" aria-label="Client sections">
@@ -676,7 +671,10 @@
               <div class="overview-panel">
                 <div class="section-title">
                   <h2>Recent Timesheets</h2>
-                  <button class="secondary" onclick={() => (clientTab = 'timesheets')}>View All Timesheets</button>
+                  <div class="actions">
+                    <button onclick={() => createTimesheetForClient(selectedClient)}><Plus size={16} /> New Timesheet</button>
+                    <button class="secondary" onclick={() => (clientTab = 'timesheets')}>View All Timesheets</button>
+                  </div>
                 </div>
                 <div class="mini-card-list">
                   {#each selectedClientPeriods.filter((period) => !period.archived).slice(0, 3) as period}
@@ -697,7 +695,10 @@
               <div class="overview-panel">
                 <div class="section-title">
                   <h2>Recent Invoices</h2>
-                  <button class="secondary" onclick={() => (clientTab = 'invoices')}>View All Invoices</button>
+                  <div class="actions">
+                    <button onclick={() => createStandaloneInvoice(selectedClient)}><Plus size={16} /> New Invoice</button>
+                    <button class="secondary" onclick={() => (clientTab = 'invoices')}>View All Invoices</button>
+                  </div>
                 </div>
                 <div class="mini-card-list">
                   {#each clientInvoices(selectedClient.id).filter((invoice) => !invoice.archived).slice(0, 3) as invoice}
