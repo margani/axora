@@ -539,6 +539,15 @@
     return { ...entry };
   }
 
+  function replaceTimesheetEntries(timesheetId: string, entries: TimesheetEntry[]) {
+    workspace = {
+      ...workspace,
+      timesheets: workspace.timesheets.map((timesheet) =>
+        timesheet.id === timesheetId ? { ...timesheet, entries: entries.map(cloneEntry) } : timesheet
+      )
+    };
+  }
+
   function entryDraftChanged() {
     return Boolean(entryDraft && JSON.stringify(entryDraft) !== JSON.stringify(entryDraftOriginal));
   }
@@ -568,12 +577,14 @@
       return;
     }
     const wasNew = entryDraftIsNew;
+    const nextEntry = cloneEntry(entryDraft);
+    const nextEntries = wasNew
+      ? [...timesheet.entries, nextEntry]
+      : timesheet.entries.map((entry) => (entry.id === nextEntry.id ? nextEntry : entry));
     if (wasNew) {
-      timesheet.entries = [...timesheet.entries, cloneEntry(entryDraft)];
       addActivity(activity(`Added hours to ${clientName(workspace.clients, period.clientId)} ${periodTitle(period)}`, 'updated', period.id));
-    } else {
-      timesheet.entries = timesheet.entries.map((entry) => (entry.id === entryDraft?.id ? cloneEntry(entryDraft) : entry));
     }
+    replaceTimesheetEntries(timesheet.id, nextEntries);
     editingEntryId = entryDraft.id;
     entryDraftOriginal = cloneEntry(entryDraft);
     entryDraftIsNew = false;
@@ -586,7 +597,7 @@
     const timesheet = periodTimesheet(period);
     if (!timesheet) return;
     if (confirmDelete && !confirm('Delete this entry?')) return;
-    timesheet.entries = timesheet.entries.filter((entry) => entry.id !== entryId);
+    replaceTimesheetEntries(timesheet.id, timesheet.entries.filter((entry) => entry.id !== entryId));
     if (editingEntryId === entryId || entryDraft?.id === entryId) closeEntryEditor(false);
     touch('Entry removed');
     showToast('Entry removed');
@@ -637,11 +648,13 @@
     if (!entryDraft) return;
     entryDraft.timeTrackingMode = useTime ? 'time' : 'duration';
     if (useTime && !timeEntryError(entryDraft)) syncEntryDurationFromTime(entryDraft);
+    entryDraft = cloneEntry(entryDraft);
   }
 
   function updateDraftHours(hours: number) {
     if (!entryDraft) return;
     entryDraft.hours = hours;
+    entryDraft = cloneEntry(entryDraft);
   }
 
   function updateDraftTiming(field: 'startTime' | 'endTime' | 'breakMinutes', value: string | number) {
@@ -649,6 +662,7 @@
     if (field === 'breakMinutes') entryDraft.breakMinutes = Number(value || 0);
     else entryDraft[field] = String(value);
     if (!timeEntryError(entryDraft)) syncEntryDurationFromTime(entryDraft);
+    entryDraft = cloneEntry(entryDraft);
   }
 
   function timeValue(value: string) {
