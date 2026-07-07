@@ -9,6 +9,7 @@
     FileText,
     History,
     LayoutDashboard,
+    MoreHorizontal,
     Plus,
     ReceiptText,
     Search,
@@ -54,6 +55,7 @@
   type View = 'dashboard' | 'clients' | 'settings' | 'timesheetDetail' | 'invoiceDetail';
   type ClientTab = 'overview' | 'timesheets' | 'invoices' | 'notes' | 'settings';
   type SortOrder = 'newest' | 'oldest';
+  type DetailMenu = '' | 'timesheet' | 'invoice';
 
   let workspace: Workspace = sampleWorkspace();
   let activeView: View = 'dashboard';
@@ -73,6 +75,7 @@
   let timesheetSort: SortOrder = 'newest';
   let invoiceSort: SortOrder = 'newest';
   let activityOpen = false;
+  let openDetailMenu: DetailMenu = '';
   let clearConfirmText = '';
   let saveTimer: ReturnType<typeof setTimeout>;
   let fileInput: HTMLInputElement;
@@ -146,10 +149,24 @@
     ready = true;
     const onPopState = () => {
       activeView = viewFromPath(window.location.pathname);
+      openDetailMenu = '';
       message = '';
     };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') openDetailMenu = '';
+    };
+    const onDocumentClick = (event: MouseEvent) => {
+      if (event.target instanceof Element && event.target.closest('[data-detail-more]')) return;
+      openDetailMenu = '';
+    };
     window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
+    window.addEventListener('keydown', onKeyDown);
+    document.addEventListener('click', onDocumentClick);
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+      window.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('click', onDocumentClick);
+    };
   });
 
   function touch(note = 'Saved locally') {
@@ -367,9 +384,18 @@
     selectedInvoiceId = '';
     clientTab = tab;
     activeView = 'clients';
+    openDetailMenu = '';
     const path = clientPath(client);
     if (window.location.pathname !== path) history.pushState({}, '', path);
     message = '';
+  }
+
+  function toggleDetailMenu(menu: DetailMenu) {
+    openDetailMenu = openDetailMenu === menu ? '' : menu;
+  }
+
+  function closeDetailMenu() {
+    openDetailMenu = '';
   }
 
   function createInvoiceForClient(client: Client) {
@@ -1103,9 +1129,18 @@
               <div class="actions">
                 <button class="secondary" onclick={() => generatePeriodPdf(selectedPeriod)}><Download size={16} /> PDF</button>
                 <button onclick={() => generateInvoiceForPeriod(selectedPeriod)}><ReceiptText size={16} /> Generate Invoice</button>
-                <button class="secondary" onclick={() => duplicateTimesheetPeriod(selectedPeriod)}><Copy size={16} /> Duplicate</button>
-                <button class="secondary" onclick={() => archivePeriod(selectedPeriod)}><Archive size={16} /> Archive</button>
-                <button class="danger" onclick={() => deleteTimesheetPeriod(selectedPeriod)}><Trash2 size={16} /> Delete</button>
+                <div class="more-menu-wrap" data-detail-more>
+                  <button class="secondary more-button" aria-haspopup="menu" aria-expanded={openDetailMenu === 'timesheet'} aria-label="More timesheet actions" onclick={() => toggleDetailMenu('timesheet')}>
+                    <MoreHorizontal size={16} /> More
+                  </button>
+                  {#if openDetailMenu === 'timesheet'}
+                    <div class="more-menu" role="menu">
+                      <button role="menuitem" onclick={() => { duplicateTimesheetPeriod(selectedPeriod); closeDetailMenu(); }}><Copy size={16} /> Duplicate</button>
+                      <button role="menuitem" onclick={() => { archivePeriod(selectedPeriod); closeDetailMenu(); }}><Archive size={16} /> Archive</button>
+                      <button class="danger-menu-item" role="menuitem" onclick={() => { deleteTimesheetPeriod(selectedPeriod); closeDetailMenu(); }}><Trash2 size={16} /> Delete</button>
+                    </div>
+                  {/if}
+                </div>
               </div>
             </div>
             <div class="section-title">
@@ -1184,10 +1219,21 @@
               </div>
               <div class="actions">
                 <button class="secondary" onclick={() => generateInvoicePdfOnly(selectedInvoice)}><Download size={16} /> PDF</button>
-                <button class="secondary" onclick={() => duplicateInvoiceForClient(selectedInvoice)}><Copy size={16} /> Duplicate</button>
-                <button onclick={() => markInvoicePaid(selectedInvoice)}><CheckCircle2 size={16} /> Mark Paid</button>
-                <button class="secondary" onclick={() => archiveInvoiceForClient(selectedInvoice)}><Archive size={16} /> Archive</button>
-                <button class="danger" onclick={() => deleteInvoiceForClient(selectedInvoice)}><Trash2 size={16} /> Delete</button>
+                {#if selectedInvoice.status !== 'paid'}
+                  <button onclick={() => markInvoicePaid(selectedInvoice)}><CheckCircle2 size={16} /> Mark Paid</button>
+                {/if}
+                <div class="more-menu-wrap" data-detail-more>
+                  <button class="secondary more-button" aria-haspopup="menu" aria-expanded={openDetailMenu === 'invoice'} aria-label="More invoice actions" onclick={() => toggleDetailMenu('invoice')}>
+                    <MoreHorizontal size={16} /> More
+                  </button>
+                  {#if openDetailMenu === 'invoice'}
+                    <div class="more-menu" role="menu">
+                      <button role="menuitem" onclick={() => { duplicateInvoiceForClient(selectedInvoice); closeDetailMenu(); }}><Copy size={16} /> Duplicate</button>
+                      <button role="menuitem" onclick={() => { archiveInvoiceForClient(selectedInvoice); closeDetailMenu(); }}><Archive size={16} /> Archive</button>
+                      <button class="danger-menu-item" role="menuitem" onclick={() => { deleteInvoiceForClient(selectedInvoice); closeDetailMenu(); }}><Trash2 size={16} /> Delete</button>
+                    </div>
+                  {/if}
+                </div>
               </div>
             </div>
             <div class="section-title">
