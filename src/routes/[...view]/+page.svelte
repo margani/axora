@@ -107,6 +107,7 @@
   $: filteredClientPeriods = selectedClient ? filteredPeriods(selectedClient.id) : [];
   $: filteredClientInvoices = selectedClient ? filteredInvoices(selectedClient.id) : [];
   $: searchResults = buildSearchResults(searchQuery);
+  $: effectiveSaveStatus = saveStatus === 'saved' && !lastSaved ? 'unsaved' : saveStatus;
 
   const viewPaths: Record<'dashboard' | 'clients' | 'settings', string> = {
     dashboard: '/',
@@ -144,6 +145,7 @@
     const loaded = loadWorkspace();
     workspace = loaded.workspace;
     lastSaved = loaded.savedAt;
+    saveStatus = loaded.savedAt ? 'saved' : 'unsaved';
     selectedClientId = workspace.clients[0]?.id ?? '';
     selectedPeriodId = clientPeriods(selectedClientId)[0]?.id ?? '';
     activeView = viewFromPath(window.location.pathname);
@@ -722,9 +724,9 @@
   }
 
   function saveStatusLabel() {
-    if (saveStatus === 'saving') return 'Saving...';
-    if (saveStatus === 'unsaved') return 'Unsaved changes';
-    if (saveStatus === 'error') return 'Save failed';
+    if (effectiveSaveStatus === 'saving') return 'Saving...';
+    if (effectiveSaveStatus === 'unsaved') return '';
+    if (effectiveSaveStatus === 'error') return 'Save failed';
     return 'Saved ✓';
   }
 
@@ -845,7 +847,12 @@
                   ? 'Dashboard'
                   : 'Settings'}
         </h1>
-        <p>Last saved: {savedLabel()} <span class="save-status {saveStatus}">{saveStatusLabel()}</span></p>
+        <p>
+          Last saved: {savedLabel()}
+          {#if saveStatusLabel()}
+            <span class="save-status {effectiveSaveStatus}">{saveStatusLabel()}</span>
+          {/if}
+        </p>
       </div>
       <div class="top-actions">
         <div class="search-box">
