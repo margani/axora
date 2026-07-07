@@ -853,16 +853,19 @@ button.context-link:hover {
 
 .entry-list {
   display: grid;
-  gap: 8px;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  background: #f3eee4;
 }
 
 .entry-list-header {
   display: grid;
   grid-template-columns: minmax(136px, 0.8fr) repeat(3, minmax(132px, 0.8fr)) 96px minmax(140px, 0.85fr) 72px 36px;
   gap: 14px;
-  padding: 0 10px 2px;
+  padding: 2px 10px 4px;
   color: #65706c;
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -883,12 +886,20 @@ button.context-link:hover {
   border: 0;
 }
 
-.entry-grid,
-.item-grid {
+.entry-grid {
   display: grid;
   gap: 10px 14px;
   align-items: center;
-  padding: 10px;
+  padding: 10px 10px 11px;
+  border-radius: 8px;
+  background: #fffbf4;
+}
+
+.item-grid {
+  display: grid;
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
   border: 1px solid #e1dacd;
   border-radius: 8px;
   background: #f9f6ef;
@@ -908,10 +919,11 @@ button.context-link:hover {
 }
 
 .entry-grid .description textarea {
-  min-height: 40px;
+  min-height: 38px;
   max-height: 88px;
   line-height: 1.35;
   resize: vertical;
+  background: #f7f2e8;
 }
 
 .entry-grid input[type='time'],
@@ -929,6 +941,21 @@ button.context-link:hover {
 .entry-grid textarea {
   min-height: 36px;
   padding-block: 8px;
+  border-color: transparent;
+  background: #f7f2e8;
+}
+
+.entry-grid input:hover,
+.entry-grid textarea:hover {
+  border-color: #ded4c4;
+}
+
+.entry-grid input:focus,
+.entry-grid textarea:focus {
+  border-color: #b7d4c8;
+  outline: 2px solid rgb(183 212 200 / 0.28);
+  outline-offset: 0;
+  background: #fffdf8;
 }
 
 .entry-grid .time-toggle {
@@ -982,6 +1009,7 @@ button.context-link:hover {
   line-height: 1.25;
   white-space: normal;
   font-size: 0.84rem;
+  color: #4a5551;
 }
 
 .check input {
