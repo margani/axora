@@ -856,7 +856,7 @@ button.context-link:hover {
   gap: 6px;
   padding: 8px;
   border-radius: 8px;
-  background: #f3eee4;
+  background: #faf8f3;
 }
 
 .entry-list-header {
@@ -892,7 +892,7 @@ button.context-link:hover {
   align-items: center;
   padding: 10px 10px 11px;
   border-radius: 8px;
-  background: #fffbf4;
+  background: #fffdf9;
 }
 
 .item-grid {
@@ -923,7 +923,7 @@ button.context-link:hover {
   max-height: 88px;
   line-height: 1.35;
   resize: vertical;
-  background: #f7f2e8;
+  background: #fffefe;
 }
 
 .entry-grid input[type='time'],
@@ -941,13 +941,13 @@ button.context-link:hover {
 .entry-grid textarea {
   min-height: 36px;
   padding-block: 8px;
-  border-color: transparent;
-  background: #f7f2e8;
+  border-color: #e4ded2;
+  background: #fffefe;
 }
 
 .entry-grid input:hover,
 .entry-grid textarea:hover {
-  border-color: #ded4c4;
+  border-color: #d5ccbe;
 }
 
 .entry-grid input:focus,
