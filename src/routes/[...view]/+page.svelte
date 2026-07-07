@@ -1150,11 +1150,11 @@
             <div class="entry-list" oninput={() => touch('Timesheet saved')}>
               {#each selectedTimesheet.entries as entry}
                 <div class:time-entry={entry.timeTrackingMode === 'time'} class="entry-grid">
-                  <label>Date <input type="date" bind:value={entry.date} /></label>
+                  <label class="date-field">Date <input type="date" bind:value={entry.date} /></label>
                   {#if entry.timeTrackingMode === 'time'}
-                    <label>Start <input type="time" value={entry.startTime} oninput={(event) => updateEntryTiming(entry, 'startTime', eventValue(event))} /></label>
-                    <label>End <input type="time" value={entry.endTime} oninput={(event) => updateEntryTiming(entry, 'endTime', eventValue(event))} /></label>
-                    <label>Break <input type="number" min="0" step="5" value={entry.breakMinutes} oninput={(event) => updateEntryTiming(entry, 'breakMinutes', eventNumber(event))} /></label>
+                    <label class="start-field">Start <input type="time" value={entry.startTime} oninput={(event) => updateEntryTiming(entry, 'startTime', eventValue(event))} /></label>
+                    <label class="end-field">End <input type="time" value={entry.endTime} oninput={(event) => updateEntryTiming(entry, 'endTime', eventValue(event))} /></label>
+                    <label class="break-field">Break <input type="number" min="0" step="5" value={entry.breakMinutes} oninput={(event) => updateEntryTiming(entry, 'breakMinutes', eventNumber(event))} /></label>
                     <div class:error={Boolean(timeEntryError(entry))} class="calculated-duration">
                       <span>Duration</span>
                       <strong>{calculatedEntryDuration(entry)}</strong>
@@ -1163,10 +1163,10 @@
                       {/if}
                     </div>
                   {:else}
-                    <label>Hours <input type="number" min="0" step="0.25" value={entry.hours} oninput={(event) => updateEntryHours(entry, eventNumber(event))} /></label>
+                    <label class="hours-field">Hours <input type="number" min="0" step="0.25" value={entry.hours} oninput={(event) => updateEntryHours(entry, eventNumber(event))} /></label>
                   {/if}
                   <label class="check"><input type="checkbox" bind:checked={entry.billable} onchange={() => touch('Timesheet saved')} /> Billable</label>
-                  <label class="description">Description <input bind:value={entry.description} /></label>
+                  <label class="description">Description <textarea rows="2" bind:value={entry.description}></textarea></label>
                   <label class="check time-toggle">
                     <input type="checkbox" checked={entry.timeTrackingMode === 'time'} onchange={(event) => setEntryTimeMode(entry, eventChecked(event))} />
                     Use start/end time
