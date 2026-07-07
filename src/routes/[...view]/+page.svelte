@@ -76,8 +76,9 @@
   let invoiceSort: SortOrder = 'newest';
   let activityOpen = false;
   let openDetailMenu: DetailMenu = '';
-  let clearConfirmText = '';
+  let clearConfirmOpen = false;
   let saveTimer: ReturnType<typeof setTimeout>;
+  let toastTimer: ReturnType<typeof setTimeout>;
   let fileInput: HTMLInputElement;
   let logoInput: HTMLInputElement;
 
@@ -150,10 +151,11 @@
     const onPopState = () => {
       activeView = viewFromPath(window.location.pathname);
       openDetailMenu = '';
-      message = '';
+      clearToast();
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') openDetailMenu = '';
+      if (event.key === 'Escape') clearConfirmOpen = false;
     };
     const onDocumentClick = (event: MouseEvent) => {
       if (event.target instanceof Element && event.target.closest('[data-detail-more]')) return;
@@ -166,6 +168,7 @@
       window.removeEventListener('popstate', onPopState);
       window.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('click', onDocumentClick);
+      clearTimeout(toastTimer);
     };
   });
 
@@ -177,8 +180,21 @@
       saveStatus = 'saving';
       lastSaved = saveWorkspace(workspace);
       saveStatus = 'saved';
-      message = note;
+      showToast(note);
     }, 250);
+  }
+
+  function showToast(note: string) {
+    message = note;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      message = '';
+    }, 3200);
+  }
+
+  function clearToast() {
+    clearTimeout(toastTimer);
+    message = '';
   }
 
   function replaceWorkspace(next: Workspace, note = 'Saved locally') {
@@ -192,7 +208,7 @@
 
   function switchView(view: View, push = true) {
     activeView = view;
-    message = '';
+    clearToast();
     const path = view === 'timesheetDetail' || view === 'invoiceDetail' ? window.location.pathname : viewPaths[view];
     if (push && window.location.pathname !== path) history.pushState({}, '', path);
   }
@@ -206,7 +222,7 @@
     const client = workspace.clients.find((item) => item.id === clientId);
     const path = client ? `/clients/${slugify(client.name || client.id)}` : '/clients';
     if (window.location.pathname !== path) history.pushState({}, '', path);
-    message = '';
+    clearToast();
   }
 
   function slugify(value: string) {
@@ -365,7 +381,7 @@
     activeView = 'timesheetDetail';
     const path = timesheetPath(period);
     if (window.location.pathname !== path) history.pushState({}, '', path);
-    message = `Opened ${periodTitle(period)} Timesheet`;
+    showToast(`Opened ${periodTitle(period)} Timesheet`);
   }
 
   function openInvoice(invoice: Invoice) {
@@ -376,7 +392,7 @@
     activeView = 'invoiceDetail';
     const path = invoicePath(invoice);
     if (window.location.pathname !== path) history.pushState({}, '', path);
-    message = `Opened Invoice ${invoice.invoiceNumber}`;
+    showToast(`Opened Invoice ${invoice.invoiceNumber}`);
   }
 
   function backToClientTab(client: Client, tab: ClientTab) {
@@ -387,7 +403,7 @@
     openDetailMenu = '';
     const path = clientPath(client);
     if (window.location.pathname !== path) history.pushState({}, '', path);
-    message = '';
+    clearToast();
   }
 
   function toggleDetailMenu(menu: DetailMenu) {
@@ -642,7 +658,7 @@
       addActivity(activity('Imported Workspace', 'import'));
       touch('Workspace imported');
     } catch (error) {
-      message = error instanceof Error ? error.message : 'Could not import workspace.';
+      showToast(error instanceof Error ? error.message : 'Could not import workspace.');
     } finally {
       input.value = '';
     }
@@ -652,7 +668,7 @@
     addActivity(activity('Exported Workspace', 'export'));
     lastSaved = saveWorkspace(workspace);
     downloadJson(workspace);
-    message = 'Workspace exported';
+    showToast('Workspace exported');
   }
 
   async function uploadLogo(event: Event) {
@@ -674,17 +690,13 @@
   }
 
   function clearLocal() {
-    if (clearConfirmText !== 'DELETE') {
-      message = 'Type DELETE before clearing local data.';
-      return;
-    }
     clearWorkspace();
     workspace = sampleWorkspace();
     selectedClientId = workspace.clients[0]?.id ?? '';
     selectedPeriodId = clientPeriods(selectedClientId)[0]?.id ?? '';
     lastSaved = '';
-    clearConfirmText = '';
-    message = 'Local data cleared. Sample data is loaded but not saved.';
+    clearConfirmOpen = false;
+    showToast('Local data cleared. Sample data is loaded but not saved.');
   }
 
   function savedLabel() {
@@ -836,13 +848,28 @@
         <input bind:this={fileInput} class="file-input" type="file" accept="application/json,.json" onchange={importWorkspace} />
         <button class="secondary" onclick={() => fileInput.click()}><Upload size={17} /><span>Import</span></button>
         <button class="secondary" onclick={exportWorkspace}><Download size={17} /><span>Export</span></button>
-        <input class="clear-input" bind:value={clearConfirmText} placeholder="Type DELETE" aria-label="Type DELETE to clear data" />
-        <button class="danger" onclick={clearLocal}><Trash2 size={17} /><span>Clear</span></button>
+        <button class="danger" onclick={() => (clearConfirmOpen = true)}><Trash2 size={17} /><span>Clear</span></button>
       </div>
     </header>
 
     {#if message}
-      <div class="notice">{message}</div>
+      <div class="toast" role="status">
+        <span>{message}</span>
+        <button class="toast-close" aria-label="Dismiss notification" onclick={clearToast}>×</button>
+      </div>
+    {/if}
+
+    {#if clearConfirmOpen}
+      <div class="modal-backdrop">
+        <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="clear-title">
+          <h2 id="clear-title">Clear all data?</h2>
+          <p>This will remove the current workspace data from this browser. This action cannot be undone.</p>
+          <div class="actions end">
+            <button class="secondary" onclick={() => (clearConfirmOpen = false)}>Cancel</button>
+            <button class="danger" onclick={clearLocal}><Trash2 size={16} /> Clear data</button>
+          </div>
+        </div>
+      </div>
     {/if}
 
     {#if activeView === 'dashboard'}
