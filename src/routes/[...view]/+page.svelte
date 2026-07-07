@@ -17,7 +17,7 @@
     Trash2,
     Upload
   } from '@lucide/svelte';
-  import type { ActivityEvent, BillingPeriod, Client, Invoice, TimesheetEntry, Workspace } from '$lib/types';
+  import type { ActivityEvent, BillingPeriod, Client, Invoice, InvoiceItem, TimesheetEntry, Workspace } from '$lib/types';
   import { generateInvoicePdf, generateTimesheetPdf } from '$lib/pdf';
   import {
     dirtySaveState,
@@ -91,6 +91,10 @@
   let entryDraft: TimesheetEntry | undefined;
   let entryDraftOriginal: TimesheetEntry | undefined;
   let entryDraftIsNew = false;
+  let editingInvoiceItemId = '';
+  let invoiceItemDraft: InvoiceItem | undefined;
+  let invoiceItemDraftOriginal: InvoiceItem | undefined;
+  let invoiceItemDraftIsNew = false;
   let saveTimer: ReturnType<typeof setTimeout>;
   let toastTimer: ReturnType<typeof setTimeout>;
   let fileInput: HTMLInputElement;
@@ -123,6 +127,8 @@
   $: searchResults = buildSearchResults(searchQuery);
   $: selectedEntryExists = Boolean(editingEntryId && selectedTimesheet?.entries.some((entry) => entry.id === editingEntryId));
   $: if (editingEntryId && !selectedEntryExists && !entryDraftIsNew) closeEntryEditor(false);
+  $: selectedInvoiceItemExists = Boolean(editingInvoiceItemId && selectedInvoice?.items.some((item) => item.id === editingInvoiceItemId));
+  $: if (editingInvoiceItemId && !selectedInvoiceItemExists && !invoiceItemDraftIsNew) closeInvoiceItemEditor(false);
 
   const viewPaths: Record<'dashboard' | 'clients' | 'settings', string> = {
     dashboard: '/',
@@ -623,6 +629,75 @@
     if (editingEntryId === entryId || entryDraft?.id === entryId) closeEntryEditor(false);
     touch('Entry removed');
     showToast('Entry removed');
+  }
+
+  function cloneInvoiceItem(item: InvoiceItem): InvoiceItem {
+    return { ...item };
+  }
+
+  function invoiceItemAmount(item: InvoiceItem, invoice = selectedInvoice) {
+    return formatMoney(Number(item.quantity || 0) * Number(item.unitPrice || 0), invoice?.currency || workspace.settings.currency);
+  }
+
+  function replaceInvoiceItems(invoiceId: string, items: InvoiceItem[]) {
+    workspace = {
+      ...workspace,
+      invoices: workspace.invoices.map((invoice) =>
+        invoice.id === invoiceId ? { ...invoice, items: items.map(cloneInvoiceItem) } : invoice
+      )
+    };
+  }
+
+  function invoiceItemDraftChanged() {
+    return Boolean(invoiceItemDraft && JSON.stringify(invoiceItemDraft) !== JSON.stringify(invoiceItemDraftOriginal));
+  }
+
+  function openInvoiceItemEditor(item: InvoiceItem, isNew = false) {
+    if (invoiceItemDraftChanged() && !confirm('Discard unsaved invoice item changes?')) return;
+    invoiceItemDraft = cloneInvoiceItem(item);
+    invoiceItemDraftOriginal = cloneInvoiceItem(item);
+    invoiceItemDraftIsNew = isNew;
+    editingInvoiceItemId = isNew ? '' : item.id;
+  }
+
+  function closeInvoiceItemEditor(confirmUnsaved = true) {
+    if (confirmUnsaved && invoiceItemDraftChanged() && !confirm('Discard unsaved invoice item changes?')) return;
+    invoiceItemDraft = undefined;
+    invoiceItemDraftOriginal = undefined;
+    invoiceItemDraftIsNew = false;
+    editingInvoiceItemId = '';
+  }
+
+  function addInvoiceItem(invoice: Invoice) {
+    const item = emptyInvoiceItem();
+    item.description = workspace.clients.find((client) => client.id === invoice.clientId)?.defaultServiceDescription || 'Professional services';
+    item.unitPrice = Number(invoice.items[0]?.unitPrice || 0);
+    openInvoiceItemEditor(item, true);
+  }
+
+  function saveInvoiceItemDraft(invoice: Invoice) {
+    if (!invoiceItemDraft) return;
+    const wasNew = invoiceItemDraftIsNew;
+    const nextItem = cloneInvoiceItem(invoiceItemDraft);
+    const nextItems = wasNew
+      ? [...invoice.items, nextItem]
+      : invoice.items.map((item) => (item.id === nextItem.id ? nextItem : item));
+    replaceInvoiceItems(invoice.id, nextItems);
+    editingInvoiceItemId = nextItem.id;
+    invoiceItemDraft = cloneInvoiceItem(nextItem);
+    invoiceItemDraftOriginal = cloneInvoiceItem(nextItem);
+    invoiceItemDraftIsNew = false;
+    touch('Invoice saved');
+    showToast(wasNew ? 'Invoice item added' : 'Invoice item saved');
+    closeInvoiceItemEditor(false);
+  }
+
+  function removeInvoiceItem(invoice: Invoice, itemId: string, confirmDelete = true) {
+    if (confirmDelete && !confirm('Delete this invoice item?')) return;
+    replaceInvoiceItems(invoice.id, invoice.items.filter((item) => item.id !== itemId));
+    if (editingInvoiceItemId === itemId || invoiceItemDraft?.id === itemId) closeInvoiceItemEditor(false);
+    touch('Item removed');
+    showToast('Item removed');
   }
 
   function deleteTimesheetPeriod(period: BillingPeriod) {
@@ -1442,17 +1517,70 @@
                 </select>
               </label>
             </div>
-            <div class="entry-list" oninput={() => touch('Invoice saved')}>
-              {#each selectedInvoice.items as item}
-                <div class="item-grid">
-                  <label>Description <input bind:value={item.description} /></label>
-                  <label>Quantity <input type="number" min="0" step="0.01" bind:value={item.quantity} /></label>
-                  <label>Unit price <input type="number" min="0" step="0.01" bind:value={item.unitPrice} /></label>
-                  <span class="duration">{formatMoney(Number(item.quantity || 0) * Number(item.unitPrice || 0), selectedInvoice.currency)}</span>
-                  <button class="icon danger-icon" aria-label="Delete invoice item" onclick={() => { selectedInvoice.items = selectedInvoice.items.filter((row) => row.id !== item.id); touch('Item removed'); }}><Trash2 size={16} /></button>
+            <div class="section-title">
+              <h2>Invoice items</h2>
+              <button onclick={() => addInvoiceItem(selectedInvoice)}><Plus size={16} /> Add Item</button>
+            </div>
+            <div class:has-editor={Boolean(invoiceItemDraft)} class="entries-workspace">
+              <div class="entry-list">
+                <div class="entry-list-header invoice-list-header" aria-hidden="true">
+                  <span>Description</span>
+                  <span>Quantity</span>
+                  <span>Rate</span>
+                  <span>Amount</span>
+                  <span>Actions</span>
                 </div>
-              {/each}
-              <button class="secondary" onclick={() => { selectedInvoice.items = [...selectedInvoice.items, emptyInvoiceItem()]; touch('Item added'); }}><Plus size={16} /> Add Invoice Item</button>
+                {#if selectedInvoice.items.length}
+                  {#each selectedInvoice.items as item}
+                    <div class:active={editingInvoiceItemId === item.id} class="entry-summary-row">
+                      <button class="entry-summary-main invoice-summary-main" aria-label={`Edit invoice item ${item.description || item.id}`} onclick={() => openInvoiceItemEditor(item)}>
+                        <span>
+                          <strong>{item.description || 'Untitled item'}</strong>
+                          <small>{Number(item.quantity || 0).toLocaleString('en-GB')} × {formatMoney(Number(item.unitPrice || 0), selectedInvoice.currency)}</small>
+                        </span>
+                        <span>{Number(item.quantity || 0).toLocaleString('en-GB')}</span>
+                        <span>{formatMoney(Number(item.unitPrice || 0), selectedInvoice.currency)}</span>
+                        <span>{invoiceItemAmount(item, selectedInvoice)}</span>
+                      </button>
+                      <div class="entry-row-actions">
+                        <button class="secondary compact" onclick={() => openInvoiceItemEditor(item)}>Edit</button>
+                        <button class="icon danger-icon" aria-label="Delete invoice item" onclick={() => removeInvoiceItem(selectedInvoice, item.id)}><Trash2 size={16} /></button>
+                      </div>
+                    </div>
+                  {/each}
+                {:else}
+                  <div class="entry-list-empty">
+                    <p>No invoice items yet.</p>
+                    <button onclick={() => addInvoiceItem(selectedInvoice)}><Plus size={16} /> Add Item</button>
+                  </div>
+                {/if}
+              </div>
+
+              {#if invoiceItemDraft}
+                <aside class="entry-editor-panel" aria-label="Invoice item editor">
+                  <div class="editor-head compact-head">
+                    <div>
+                      <span>{invoiceItemDraftIsNew ? 'New invoice item' : 'Editing invoice item'}</span>
+                      <h3>{invoiceItemDraft.description || 'Invoice item'}</h3>
+                    </div>
+                    <button class="secondary compact" onclick={() => closeInvoiceItemEditor()}>Close</button>
+                  </div>
+
+                  <div class="entry-editor-form">
+                    <label class="wide">Description <textarea rows="4" placeholder="Item description" bind:value={invoiceItemDraft.description}></textarea></label>
+                    <label>Quantity <input type="number" min="0" step="0.01" bind:value={invoiceItemDraft.quantity} /></label>
+                    <label>Rate <input type="number" min="0" step="0.01" bind:value={invoiceItemDraft.unitPrice} /></label>
+                    <div class="duration editor-total">
+                      <span>Amount: {invoiceItemAmount(invoiceItemDraft, selectedInvoice)}</span>
+                    </div>
+                  </div>
+
+                  <div class="entry-editor-actions">
+                    <button class="secondary" onclick={() => closeInvoiceItemEditor()}>Cancel</button>
+                    <button onclick={() => saveInvoiceItemDraft(selectedInvoice)}><CheckCircle2 size={16} /> Save changes</button>
+                  </div>
+                </aside>
+              {/if}
             </div>
           </section>
         </section>

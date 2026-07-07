@@ -901,6 +901,10 @@ button.context-link:hover {
   text-transform: uppercase;
 }
 
+.invoice-list-header {
+  grid-template-columns: minmax(220px, 1.7fr) minmax(90px, 0.65fr) minmax(110px, 0.75fr) minmax(120px, 0.8fr) 116px;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -955,6 +959,10 @@ button.context-link:hover {
   text-align: left;
   color: #1d2525;
   background: transparent;
+}
+
+.invoice-summary-main {
+  grid-template-columns: minmax(220px, 1.7fr) minmax(90px, 0.65fr) minmax(110px, 0.75fr) minmax(120px, 0.8fr);
 }
 
 .entry-summary-main:hover {
@@ -1076,20 +1084,6 @@ button.context-link:hover {
   gap: 10px;
   align-items: center;
   padding-top: 2px;
-}
-
-.item-grid {
-  display: grid;
-  gap: 10px;
-  align-items: end;
-  padding: 12px;
-  border: 1px solid #e1dacd;
-  border-radius: 8px;
-  background: #f9f6ef;
-}
-
-.item-grid {
-  grid-template-columns: minmax(220px, 1fr) 120px 140px 120px 40px;
 }
 
 .check {
@@ -1421,14 +1415,6 @@ button.context-link:hover {
     display: grid;
   }
 
-  .item-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .item-grid label:first-child {
-    grid-column: 1 / -1;
-  }
-
   .entry-editor-panel {
     position: static;
   }
@@ -1443,12 +1429,9 @@ button.context-link:hover {
     display: none;
   }
 
-  .item-grid {
-    grid-template-columns: 1fr;
-  }
-
   .entry-summary-row,
   .entry-summary-main,
+  .invoice-summary-main,
   .time-editor-grid,
   .entry-editor-form {
     grid-template-columns: 1fr;
