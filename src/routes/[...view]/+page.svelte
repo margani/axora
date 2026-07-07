@@ -1089,13 +1089,9 @@
           </div>
 
           <section class="tab-panel workspace-detail">
-            <nav class="detail-context" aria-label="Timesheet location">
-              <button class="context-link" onclick={() => backToClientTab(selectedClient, 'timesheets')}>← Timesheets</button>
-              <span>/</span>
-              <strong>{periodTitle(selectedPeriod)}</strong>
-            </nav>
             <div class="detail-card">
               <div>
+                <button class="context-link" onclick={() => backToClientTab(selectedClient, 'timesheets')}>← Back</button>
                 <small>{periodInvoice(selectedPeriod)?.status ?? 'No invoice'}{selectedPeriod.archived ? ' · Archived' : ''}</small>
                 <h2>{periodTitle(selectedPeriod)}</h2>
                 <div class="record-meta">
@@ -1174,13 +1170,9 @@
           </div>
 
           <section class="tab-panel workspace-detail">
-            <nav class="detail-context" aria-label="Invoice location">
-              <button class="context-link" onclick={() => backToClientTab(selectedClient, 'invoices')}>← Invoices</button>
-              <span>/</span>
-              <strong>{selectedInvoice.invoiceNumber}</strong>
-            </nav>
             <div class="detail-card">
               <div>
+                <button class="context-link" onclick={() => backToClientTab(selectedClient, 'invoices')}>← Back</button>
                 <small>{selectedInvoice.status}{selectedInvoice.archived ? ' · Archived' : ''}</small>
                 <h2>{selectedInvoice.invoiceNumber}</h2>
                 <div class="record-meta">
