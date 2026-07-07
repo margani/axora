@@ -592,16 +592,6 @@
     showToast('Entry removed');
   }
 
-  function deleteEntryDraft(period: BillingPeriod) {
-    if (!entryDraft) return;
-    if (!confirm('Delete this entry?')) return;
-    if (entryDraftIsNew) {
-      closeEntryEditor(false);
-      return;
-    }
-    removeEntry(period, entryDraft.id, false);
-  }
-
   function deleteTimesheetPeriod(period: BillingPeriod) {
     const client = workspace.clients.find((item) => item.id === period.clientId);
     const timesheet = periodTimesheet(period);
@@ -1342,11 +1332,8 @@
                   </div>
 
                   <div class="entry-editor-actions">
-                    <button class="danger secondary-danger" onclick={() => deleteEntryDraft(selectedPeriod)}><Trash2 size={16} /> Delete entry</button>
-                    <div class="actions">
-                      <button class="secondary" onclick={() => closeEntryEditor()}>Cancel</button>
-                      <button onclick={() => saveEntryDraft(selectedPeriod)}><CheckCircle2 size={16} /> Save changes</button>
-                    </div>
+                    <button class="secondary" onclick={() => closeEntryEditor()}>Cancel</button>
+                    <button onclick={() => saveEntryDraft(selectedPeriod)}><CheckCircle2 size={16} /> Save changes</button>
                   </div>
                 </aside>
               {/if}

@@ -1049,20 +1049,10 @@ button.context-link:hover {
 
 .entry-editor-actions {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 10px;
   align-items: center;
   padding-top: 2px;
-}
-
-.secondary-danger {
-  background: #f7e7e3;
-  color: #8f3535;
-}
-
-.secondary-danger:hover {
-  background: #edd2cb;
-  color: #742929;
 }
 
 .item-grid {
@@ -1436,19 +1426,16 @@ button.context-link:hover {
 
   .entry-summary-row,
   .entry-summary-main,
-  .entry-editor-actions,
   .time-editor-grid,
   .entry-editor-form {
     grid-template-columns: 1fr;
   }
 
-  .entry-summary-row,
-  .entry-editor-actions {
+  .entry-summary-row {
     display: grid;
   }
 
-  .entry-row-actions,
-  .entry-editor-actions .actions {
+  .entry-row-actions {
     justify-content: flex-start;
   }
 
