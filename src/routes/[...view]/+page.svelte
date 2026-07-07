@@ -344,6 +344,7 @@
     selectedClientId = period.clientId;
     selectedPeriodId = period.id;
     selectedInvoiceId = '';
+    clientTab = 'timesheets';
     activeView = 'timesheetDetail';
     const path = timesheetPath(period);
     if (window.location.pathname !== path) history.pushState({}, '', path);
@@ -354,10 +355,21 @@
     selectedClientId = invoice.clientId;
     selectedInvoiceId = invoice.id;
     selectedPeriodId = workspace.billingPeriods.find((period) => period.invoiceId === invoice.id)?.id ?? selectedPeriodId;
+    clientTab = 'invoices';
     activeView = 'invoiceDetail';
     const path = invoicePath(invoice);
     if (window.location.pathname !== path) history.pushState({}, '', path);
     message = `Opened Invoice ${invoice.invoiceNumber}`;
+  }
+
+  function backToClientTab(client: Client, tab: ClientTab) {
+    selectedClientId = client.id;
+    selectedInvoiceId = '';
+    clientTab = tab;
+    activeView = 'clients';
+    const path = clientPath(client);
+    if (window.location.pathname !== path) history.pushState({}, '', path);
+    message = '';
   }
 
   function createInvoiceForClient(client: Client) {
@@ -466,6 +478,37 @@
     if (!timesheet) return;
     timesheet.entries = timesheet.entries.filter((entry) => entry.id !== entryId);
     touch('Entry removed');
+  }
+
+  function deleteTimesheetPeriod(period: BillingPeriod) {
+    const client = workspace.clients.find((item) => item.id === period.clientId);
+    const timesheet = periodTimesheet(period);
+    if (!client || !timesheet) return;
+    if (!confirm(`Delete ${periodTitle(period)} timesheet?`)) return;
+    workspace = {
+      ...workspace,
+      timesheets: workspace.timesheets.filter((item) => item.id !== timesheet.id),
+      billingPeriods: workspace.billingPeriods.filter((item) => item.id !== period.id)
+    };
+    addActivity(activity(`Deleted ${periodTitle(period)} timesheet for ${client.name || 'client'}`, 'updated'));
+    backToClientTab(client, 'timesheets');
+    touch('Timesheet deleted');
+  }
+
+  function deleteInvoiceForClient(invoice: Invoice) {
+    const client = workspace.clients.find((item) => item.id === invoice.clientId);
+    if (!client) return;
+    if (!confirm(`Delete Invoice ${invoice.invoiceNumber}?`)) return;
+    workspace = {
+      ...workspace,
+      invoices: workspace.invoices.filter((item) => item.id !== invoice.id),
+      billingPeriods: workspace.billingPeriods
+        .map((period) => (period.invoiceId === invoice.id ? { ...period, invoiceId: '' } : period))
+        .filter((period) => period.timesheetId || period.invoiceId)
+    };
+    addActivity(activity(`Deleted Invoice ${invoice.invoiceNumber}`, 'updated'));
+    backToClientTab(client, 'invoices');
+    touch('Invoice deleted');
   }
 
   function eventChecked(event: Event) {
@@ -1024,31 +1067,50 @@
       {/if}
     {:else if activeView === 'timesheetDetail'}
       {#if selectedClient && selectedPeriod && selectedTimesheet}
-        <section class="detail-page">
-          <nav class="breadcrumb" aria-label="Breadcrumb">
-            <button onclick={() => openClient(selectedClient.id)}>{selectedClient.name || 'Client'}</button>
-            <span>&gt;</span>
-            <button onclick={() => { openClient(selectedClient.id); clientTab = 'timesheets'; }}>Timesheets</button>
-            <span>&gt;</span>
-            <strong>{periodTitle(selectedPeriod)}</strong>
-          </nav>
-          <div class="detail-header">
+        <section class="client-workspace">
+          <div class="client-summary">
             <div>
-              <h2>{periodTitle(selectedPeriod)}</h2>
-              <div class="record-meta">
-                <span>{formatHours(periodHours(selectedPeriod))}</span>
-                <span>{formatMoney(periodValue(selectedPeriod), periodCurrency(selectedPeriod))}</span>
-                <span>{selectedTimesheet.currency} · {formatMoney(selectedTimesheet.hourlyRate, selectedTimesheet.currency)}/h</span>
-              </div>
+              <h2>{selectedClient.name || 'Untitled client'}</h2>
+              <p>{selectedClient.email || selectedClient.contactName || 'Client workspace'}</p>
             </div>
-            <div class="actions">
-              <button class="secondary" onclick={() => generatePeriodPdf(selectedPeriod)}><Download size={16} /> PDF</button>
-              <button onclick={() => generateInvoiceForPeriod(selectedPeriod)}><ReceiptText size={16} /> Generate Invoice</button>
-              <button class="secondary" onclick={() => duplicateTimesheetPeriod(selectedPeriod)}><Copy size={16} /> Duplicate</button>
-              <button class="secondary" onclick={() => archivePeriod(selectedPeriod)}><Archive size={16} /> Archive</button>
+            <div class="summary-metrics">
+              <div><span>Outstanding</span><strong>{formatMoney(clientOutstanding(selectedClient.id), selectedClient.defaultCurrency)}</strong></div>
+              <div><span>Revenue YTD</span><strong>{formatMoney(clientRevenueYtd(selectedClient.id), selectedClient.defaultCurrency)}</strong></div>
+              <div><span>Hours YTD</span><strong>{formatHours(clientHoursYtd(selectedClient.id))}</strong></div>
             </div>
           </div>
-          <section class="detail-editor">
+
+          <div class="client-tabs" role="tablist" aria-label="Client sections">
+            <button onclick={() => backToClientTab(selectedClient, 'overview')}>Overview</button>
+            <button class="active" onclick={() => backToClientTab(selectedClient, 'timesheets')}>Timesheets</button>
+            <button onclick={() => backToClientTab(selectedClient, 'invoices')}>Invoices</button>
+            <button onclick={() => backToClientTab(selectedClient, 'notes')}>Notes</button>
+            <button onclick={() => backToClientTab(selectedClient, 'settings')}>Settings</button>
+          </div>
+
+          <section class="tab-panel workspace-detail">
+            <div class="detail-context">
+              <button class="secondary" onclick={() => backToClientTab(selectedClient, 'timesheets')}>Back to timesheets</button>
+              <span>Timesheets / {periodTitle(selectedPeriod)}</span>
+            </div>
+            <div class="detail-card">
+              <div>
+                <small>{periodInvoice(selectedPeriod)?.status ?? 'No invoice'}{selectedPeriod.archived ? ' · Archived' : ''}</small>
+                <h2>{periodTitle(selectedPeriod)}</h2>
+                <div class="record-meta">
+                  <span>{formatHours(periodHours(selectedPeriod))}</span>
+                  <span>{formatMoney(periodValue(selectedPeriod), periodCurrency(selectedPeriod))}</span>
+                  <span>{selectedTimesheet.currency} · {formatMoney(selectedTimesheet.hourlyRate, selectedTimesheet.currency)}/h</span>
+                </div>
+              </div>
+              <div class="actions">
+                <button class="secondary" onclick={() => generatePeriodPdf(selectedPeriod)}><Download size={16} /> PDF</button>
+                <button onclick={() => generateInvoiceForPeriod(selectedPeriod)}><ReceiptText size={16} /> Generate Invoice</button>
+                <button class="secondary" onclick={() => duplicateTimesheetPeriod(selectedPeriod)}><Copy size={16} /> Duplicate</button>
+                <button class="secondary" onclick={() => archivePeriod(selectedPeriod)}><Archive size={16} /> Archive</button>
+                <button class="danger" onclick={() => deleteTimesheetPeriod(selectedPeriod)}><Trash2 size={16} /> Delete</button>
+              </div>
+            </div>
             <div class="section-title">
               <h2>Entries</h2>
               <button onclick={() => addEntry(selectedPeriod)}><Plus size={16} /> Add Hours</button>
@@ -1089,36 +1151,54 @@
       {/if}
     {:else if activeView === 'invoiceDetail'}
       {#if selectedClient && selectedInvoice}
-        <section class="detail-page">
-          <nav class="breadcrumb" aria-label="Breadcrumb">
-            <button onclick={() => openClient(selectedClient.id)}>{selectedClient.name || 'Client'}</button>
-            <span>&gt;</span>
-            <button onclick={() => { openClient(selectedClient.id); clientTab = 'invoices'; }}>Invoices</button>
-            <span>&gt;</span>
-            <strong>{selectedInvoice.invoiceNumber}</strong>
-          </nav>
-          <div class="detail-header">
+        <section class="client-workspace">
+          <div class="client-summary">
             <div>
-              <h2>{selectedInvoice.invoiceNumber}</h2>
-              <div class="record-meta">
-                <span>{selectedInvoice.status}</span>
-                <span>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</span>
-                <span>Template: {templateLabel(selectedInvoice.template)}</span>
-                <span>Due {selectedInvoice.dueDate}</span>
-              </div>
+              <h2>{selectedClient.name || 'Untitled client'}</h2>
+              <p>{selectedClient.email || selectedClient.contactName || 'Client workspace'}</p>
             </div>
-            <div class="actions">
-              <button class="secondary" onclick={() => generateInvoicePdfOnly(selectedInvoice)}><Download size={16} /> PDF</button>
-              <button class="secondary" onclick={() => duplicateInvoiceForClient(selectedInvoice)}><Copy size={16} /> Duplicate</button>
-              <button onclick={() => markInvoicePaid(selectedInvoice)}><CheckCircle2 size={16} /> Mark Paid</button>
-              <button class="secondary" onclick={() => archiveInvoiceForClient(selectedInvoice)}><Archive size={16} /> Archive</button>
+            <div class="summary-metrics">
+              <div><span>Outstanding</span><strong>{formatMoney(clientOutstanding(selectedClient.id), selectedClient.defaultCurrency)}</strong></div>
+              <div><span>Revenue YTD</span><strong>{formatMoney(clientRevenueYtd(selectedClient.id), selectedClient.defaultCurrency)}</strong></div>
+              <div><span>Hours YTD</span><strong>{formatHours(clientHoursYtd(selectedClient.id))}</strong></div>
             </div>
           </div>
-          <section class="detail-editor">
-            <div class="invoice-summary">
-              <strong>{selectedInvoice.invoiceNumber}</strong>
-              <span>{selectedInvoice.status} · Template: {templateLabel(selectedInvoice.template)} · Issue {selectedInvoice.issueDate} · Due {selectedInvoice.dueDate}</span>
-              <b>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</b>
+
+          <div class="client-tabs" role="tablist" aria-label="Client sections">
+            <button onclick={() => backToClientTab(selectedClient, 'overview')}>Overview</button>
+            <button onclick={() => backToClientTab(selectedClient, 'timesheets')}>Timesheets</button>
+            <button class="active" onclick={() => backToClientTab(selectedClient, 'invoices')}>Invoices</button>
+            <button onclick={() => backToClientTab(selectedClient, 'notes')}>Notes</button>
+            <button onclick={() => backToClientTab(selectedClient, 'settings')}>Settings</button>
+          </div>
+
+          <section class="tab-panel workspace-detail">
+            <div class="detail-context">
+              <button class="secondary" onclick={() => backToClientTab(selectedClient, 'invoices')}>Back to invoices</button>
+              <span>Invoices / {selectedInvoice.invoiceNumber}</span>
+            </div>
+            <div class="detail-card">
+              <div>
+                <small>{selectedInvoice.status}{selectedInvoice.archived ? ' · Archived' : ''}</small>
+                <h2>{selectedInvoice.invoiceNumber}</h2>
+                <div class="record-meta">
+                  <span>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</span>
+                  <span>Due {selectedInvoice.dueDate}</span>
+                  <span>Issue {selectedInvoice.issueDate}</span>
+                  <span>Template: {templateLabel(selectedInvoice.template)}</span>
+                </div>
+              </div>
+              <div class="actions">
+                <button class="secondary" onclick={() => generateInvoicePdfOnly(selectedInvoice)}><Download size={16} /> PDF</button>
+                <button class="secondary" onclick={() => duplicateInvoiceForClient(selectedInvoice)}><Copy size={16} /> Duplicate</button>
+                <button onclick={() => markInvoicePaid(selectedInvoice)}><CheckCircle2 size={16} /> Mark Paid</button>
+                <button class="secondary" onclick={() => archiveInvoiceForClient(selectedInvoice)}><Archive size={16} /> Archive</button>
+                <button class="danger" onclick={() => deleteInvoiceForClient(selectedInvoice)}><Trash2 size={16} /> Delete</button>
+              </div>
+            </div>
+            <div class="section-title">
+              <h2>Invoice details</h2>
+              <strong>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</strong>
             </div>
             <div class="form-grid invoice-options" oninput={() => touch('Invoice saved')}>
               <label>Invoice Template

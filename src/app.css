@@ -563,29 +563,6 @@ textarea {
   max-width: 1180px;
 }
 
-.summary-strip {
-  margin: 18px 0;
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 14px 16px;
-  background: #17201f;
-  color: white;
-  border-radius: 8px;
-}
-
-.record-header {
-  margin-bottom: 18px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px;
-  border-radius: 8px;
-  background: #17201f;
-  color: #fffdf8;
-}
-
 .client-summary {
   margin-bottom: 14px;
   display: grid;
@@ -709,11 +686,6 @@ textarea {
   margin-top: 10px;
 }
 
-.record-header p {
-  color: #c9d8d5;
-  margin-top: 4px;
-}
-
 .record-meta {
   display: flex;
   gap: 8px;
@@ -730,13 +702,46 @@ textarea {
   font-weight: 700;
 }
 
-.record-header .secondary {
-  background: #334441;
-  color: #fffdf8;
+.workspace-detail {
+  display: grid;
+  gap: 16px;
 }
 
-.record-header .secondary:hover {
-  background: #425955;
+.detail-context {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #65706c;
+  font-weight: 700;
+}
+
+.detail-context .secondary {
+  min-height: 36px;
+}
+
+.detail-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+  padding: 16px;
+  border: 1px solid #ded8ca;
+  border-radius: 8px;
+  background: #f7f3ea;
+}
+
+.detail-card small {
+  color: #65706c;
+  font-weight: 750;
+}
+
+.detail-card h2 {
+  margin-top: 4px;
+  font-size: clamp(1.35rem, 2.1vw, 1.85rem);
+}
+
+.detail-card .actions {
+  justify-content: flex-end;
 }
 
 .inline-check {
@@ -1002,67 +1007,6 @@ textarea {
   background: #fffdf8;
 }
 
-.detail-page {
-  max-width: 1180px;
-}
-
-.breadcrumb {
-  margin-bottom: 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #65706c;
-}
-
-.breadcrumb button {
-  min-height: 0;
-  padding: 0;
-  background: transparent;
-  color: #1f6f68;
-  font-weight: 750;
-}
-
-.breadcrumb button:hover {
-  background: transparent;
-  color: #185a55;
-}
-
-.breadcrumb strong {
-  color: #1d2525;
-}
-
-.detail-header {
-  margin-bottom: 18px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 18px;
-  border-radius: 8px;
-  background: #17201f;
-  color: #fffdf8;
-}
-
-.detail-header h2 {
-  font-size: clamp(1.45rem, 2.4vw, 2rem);
-}
-
-.detail-header .secondary {
-  background: #334441;
-  color: #fffdf8;
-}
-
-.detail-header .secondary:hover {
-  background: #425955;
-}
-
-.detail-editor {
-  padding: 18px;
-  border: 1px solid #ded8ca;
-  border-radius: 8px;
-  background: #fffdf8;
-}
-
 .danger-zone {
   justify-content: flex-end;
   margin-top: 16px;
@@ -1070,27 +1014,6 @@ textarea {
 
 .workflow-section h3 {
   margin-bottom: 12px;
-}
-
-.invoice-summary {
-  margin-bottom: 14px;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 6px 12px;
-  align-items: center;
-  padding: 14px;
-  border-radius: 8px;
-  background: #f0eadf;
-}
-
-.invoice-summary span {
-  color: #65706c;
-}
-
-.invoice-summary b {
-  grid-row: 1 / span 2;
-  grid-column: 2;
-  font-size: 1.15rem;
 }
 
 .invoice-options {
@@ -1168,8 +1091,7 @@ textarea {
   .billing-layout,
   .client-summary,
   .overview-grid,
-  .detail-header,
-  .record-header {
+  .detail-card {
     display: grid;
     grid-template-columns: 1fr;
   }
