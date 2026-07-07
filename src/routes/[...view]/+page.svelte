@@ -63,7 +63,7 @@
   let selectedPeriodId = '';
   let selectedInvoiceId = '';
   let lastSaved = '';
-  let saveStatus: 'saved' | 'saving' | 'unsaved' = 'saved';
+  let saveStatus: 'saved' | 'saving' | 'unsaved' | 'error' = 'saved';
   let ready = false;
   let message = '';
   let searchQuery = '';
@@ -178,8 +178,13 @@
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       saveStatus = 'saving';
-      lastSaved = saveWorkspace(workspace);
-      saveStatus = 'saved';
+      try {
+        lastSaved = saveWorkspace(workspace);
+        saveStatus = 'saved';
+      } catch (error) {
+        saveStatus = 'error';
+        showToast(error instanceof Error ? error.message : 'Could not save workspace.');
+      }
     }, 250);
   }
 
@@ -676,6 +681,7 @@
   function exportWorkspace() {
     addActivity(activity('Exported Workspace', 'export'));
     lastSaved = saveWorkspace(workspace);
+    saveStatus = 'saved';
     downloadJson(workspace);
     showToast('Workspace exported');
   }
@@ -704,19 +710,22 @@
     selectedClientId = workspace.clients[0]?.id ?? '';
     selectedPeriodId = clientPeriods(selectedClientId)[0]?.id ?? '';
     lastSaved = '';
+    saveStatus = 'unsaved';
     clearConfirmOpen = false;
     showToast('Local data cleared. Sample data is loaded but not saved.');
   }
 
   function savedLabel() {
     if (!lastSaved) return 'Not saved yet';
+    if (Date.now() - new Date(lastSaved).getTime() < 60_000) return 'just now';
     return new Date(lastSaved).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
   }
 
   function saveStatusLabel() {
     if (saveStatus === 'saving') return 'Saving...';
     if (saveStatus === 'unsaved') return 'Unsaved changes';
-    return 'Saved';
+    if (saveStatus === 'error') return 'Save failed';
+    return 'Saved ✓';
   }
 
   function formatDateTime(value: string) {
@@ -1188,7 +1197,6 @@
                 <span>Date</span>
                 <span class="time-heading">Hours / Time</span>
                 <span>Billable</span>
-                <span>Description</span>
                 <span>Total</span>
                 <span>Mode</span>
                 <span></span>
