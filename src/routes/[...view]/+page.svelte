@@ -112,7 +112,6 @@
   $: filteredClientPeriods = selectedClient ? filteredPeriods(selectedClient.id) : [];
   $: filteredClientInvoices = selectedClient ? filteredInvoices(selectedClient.id) : [];
   $: searchResults = buildSearchResults(searchQuery);
-  $: effectiveSaveStatus = saveStatus === 'saved' && !lastSaved ? 'unsaved' : saveStatus;
   $: selectedEntryExists = Boolean(editingEntryId && selectedTimesheet?.entries.some((entry) => entry.id === editingEntryId));
   $: if (editingEntryId && !selectedEntryExists && !entryDraftIsNew) closeEntryEditor(false);
 
@@ -201,13 +200,17 @@
     saveTimer = setTimeout(() => {
       saveStatus = 'saving';
       try {
-        lastSaved = saveWorkspace(workspace);
-        saveStatus = 'saved';
+        persistWorkspace();
       } catch (error) {
         saveStatus = 'error';
         showToast(error instanceof Error ? error.message : 'Could not save workspace.');
       }
     }, 250);
+  }
+
+  function persistWorkspace() {
+    lastSaved = saveWorkspace(workspace);
+    saveStatus = 'saved';
   }
 
   function showToast(note: string) {
@@ -759,8 +762,7 @@
 
   function exportWorkspace() {
     addActivity(activity('Exported Workspace', 'export'));
-    lastSaved = saveWorkspace(workspace);
-    saveStatus = 'saved';
+    persistWorkspace();
     downloadJson(workspace);
     showToast('Workspace exported');
   }
@@ -800,10 +802,14 @@
     return new Date(lastSaved).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
   }
 
+  function saveStatusText() {
+    if (saveStatus === 'saving') return 'Saving...';
+    if (saveStatus === 'error') return 'Save failed';
+    return `Last saved: ${savedLabel()}`;
+  }
+
   function saveStatusLabel() {
-    if (effectiveSaveStatus === 'saving') return 'Saving...';
-    if (effectiveSaveStatus === 'unsaved') return '';
-    if (effectiveSaveStatus === 'error') return 'Save failed';
+    if (saveStatus !== 'saved' || !lastSaved) return '';
     return 'Saved ✓';
   }
 
@@ -925,9 +931,9 @@
                   : 'Settings'}
         </h1>
         <p>
-          Last saved: {savedLabel()}
+          {saveStatusText()}
           {#if saveStatusLabel()}
-            <span class="save-status {effectiveSaveStatus}">{saveStatusLabel()}</span>
+            <span class="save-status {saveStatus}">{saveStatusLabel()}</span>
           {/if}
         </p>
       </div>
