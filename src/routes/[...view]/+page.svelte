@@ -31,12 +31,14 @@
     duplicateInvoice,
     emptyBillingPeriod,
     emptyClient,
+    emptyWorkspace,
     emptyInvoice,
     emptyInvoiceItem,
     emptyTimesheet,
     emptyTimesheetEntry,
     formatHours,
     formatMoney,
+    hasSavedWorkspace,
     invoiceFromTimesheet,
     invoiceTotal,
     loadWorkspace,
@@ -44,7 +46,6 @@
     nextInvoiceNumber,
     nextMonth,
     normalizeWorkspace,
-    sampleWorkspace,
     saveWorkspace,
     syncEntryDurationFromTime,
     entryMinutes,
@@ -57,7 +58,7 @@
   type SortOrder = 'newest' | 'oldest';
   type DetailMenu = '' | 'timesheet' | 'invoice';
 
-  let workspace: Workspace = sampleWorkspace();
+  let workspace: Workspace = emptyWorkspace();
   let activeView: View = 'dashboard';
   let selectedClientId = '';
   let selectedPeriodId = '';
@@ -148,14 +149,7 @@
   }
 
   onMount(() => {
-    const loaded = loadWorkspace();
-    workspace = loaded.workspace;
-    lastSaved = loaded.savedAt;
-    saveStatus = loaded.savedAt ? 'saved' : 'unsaved';
-    selectedClientId = workspace.clients[0]?.id ?? '';
-    selectedPeriodId = clientPeriods(selectedClientId)[0]?.id ?? '';
-    activeView = viewFromPath(window.location.pathname);
-    ready = true;
+    void initializeWorkspace();
     const onPopState = () => {
       activeView = viewFromPath(window.location.pathname);
       openDetailMenu = '';
@@ -181,6 +175,24 @@
       clearTimeout(toastTimer);
     };
   });
+
+  async function initializeWorkspace() {
+    const hasSavedData = hasSavedWorkspace();
+    const loaded = loadWorkspace();
+    workspace = loaded.workspace;
+
+    if (!hasSavedData && import.meta.env.DEV && import.meta.env.VITE_ENABLE_DEMO_DATA === 'true') {
+      const { demoWorkspace } = await import('$lib/demoWorkspace');
+      workspace = demoWorkspace();
+    }
+
+    lastSaved = hasSavedData ? loaded.savedAt : '';
+    saveStatus = lastSaved ? 'saved' : 'unsaved';
+    selectedClientId = workspace.clients[0]?.id ?? '';
+    selectedPeriodId = clientPeriods(selectedClientId)[0]?.id ?? '';
+    activeView = viewFromPath(window.location.pathname);
+    ready = true;
+  }
 
   function touch(note = 'Saved locally') {
     if (!ready) return;
@@ -773,13 +785,13 @@
 
   function clearLocal() {
     clearWorkspace();
-    workspace = sampleWorkspace();
+    workspace = emptyWorkspace();
     selectedClientId = workspace.clients[0]?.id ?? '';
     selectedPeriodId = clientPeriods(selectedClientId)[0]?.id ?? '';
     lastSaved = '';
     saveStatus = 'unsaved';
     clearConfirmOpen = false;
-    showToast('Local data cleared. Sample data is loaded but not saved.');
+    showToast('Local data cleared.');
   }
 
   function savedLabel() {
@@ -970,21 +982,31 @@
         <div class="metric"><span>Hours this month</span><strong>{formatHours(hoursThisMonth)}</strong></div>
         <div class="metric"><span>Hours this year</span><strong>{formatHours(hoursThisYear)}</strong></div>
       </section>
-      <section class="period-grid">
-        {#each workspace.clients as client}
-          <article class="period-card client-overview">
-            <div>
-              <h3>{client.name || 'Untitled client'}</h3>
-              <small>{client.email || client.contactName || 'No contact details'}</small>
-            </div>
-            <div class="period-metrics">
-              <span>Outstanding: <b>{formatMoney(clientOutstanding(client.id), client.defaultCurrency)}</b></span>
-              <span>Hours this month: <b>{formatHours(clientHoursThisMonth(client.id))}</b></span>
-            </div>
-            <button onclick={() => openClient(client.id)}>Open Client</button>
-          </article>
-        {/each}
-      </section>
+      {#if workspace.clients.length}
+        <section class="period-grid">
+          {#each workspace.clients as client}
+            <article class="period-card client-overview">
+              <div>
+                <h3>{client.name || 'Untitled client'}</h3>
+                <small>{client.email || client.contactName || 'No contact details'}</small>
+              </div>
+              <div class="period-metrics">
+                <span>Outstanding: <b>{formatMoney(clientOutstanding(client.id), client.defaultCurrency)}</b></span>
+                <span>Hours this month: <b>{formatHours(clientHoursThisMonth(client.id))}</b></span>
+              </div>
+              <button onclick={() => openClient(client.id)}>Open Client</button>
+            </article>
+          {/each}
+        </section>
+      {:else}
+        <section class="empty-state dashboard-empty">
+          <div>
+            <h2>No clients yet</h2>
+            <p>Create your first client to start tracking timesheets and invoices.</p>
+            <button onclick={addClient}><Plus size={16} /> New Client</button>
+          </div>
+        </section>
+      {/if}
       <section class="list-panel">
         <div class="section-title"><h2>Recent Activity</h2><History size={18} /></div>
         <div class="activity-list">

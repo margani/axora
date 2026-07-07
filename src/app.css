@@ -556,6 +556,29 @@ textarea {
   border-radius: 8px;
 }
 
+.dashboard-empty {
+  margin-bottom: 18px;
+  text-align: center;
+  background: #fffdf8;
+}
+
+.dashboard-empty div {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  max-width: 420px;
+  padding: 22px;
+}
+
+.dashboard-empty h2 {
+  color: #1d2525;
+  font-size: 1.25rem;
+}
+
+.dashboard-empty p {
+  max-width: 34rem;
+}
+
 .table {
   overflow: auto;
 }
