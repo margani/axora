@@ -77,6 +77,10 @@
   let activityOpen = false;
   let openDetailMenu: DetailMenu = '';
   let clearConfirmOpen = false;
+  let editingEntryId = '';
+  let entryDraft: TimesheetEntry | undefined;
+  let entryDraftOriginal: TimesheetEntry | undefined;
+  let entryDraftIsNew = false;
   let saveTimer: ReturnType<typeof setTimeout>;
   let toastTimer: ReturnType<typeof setTimeout>;
   let fileInput: HTMLInputElement;
@@ -108,6 +112,8 @@
   $: filteredClientInvoices = selectedClient ? filteredInvoices(selectedClient.id) : [];
   $: searchResults = buildSearchResults(searchQuery);
   $: effectiveSaveStatus = saveStatus === 'saved' && !lastSaved ? 'unsaved' : saveStatus;
+  $: selectedEntryExists = Boolean(editingEntryId && selectedTimesheet?.entries.some((entry) => entry.id === editingEntryId));
+  $: if (editingEntryId && !selectedEntryExists && !entryDraftIsNew) closeEntryEditor(false);
 
   const viewPaths: Record<'dashboard' | 'clients' | 'settings', string> = {
     dashboard: '/',
@@ -153,11 +159,13 @@
     const onPopState = () => {
       activeView = viewFromPath(window.location.pathname);
       openDetailMenu = '';
+      closeEntryEditor(false);
       clearToast();
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') openDetailMenu = '';
       if (event.key === 'Escape') clearConfirmOpen = false;
+      if (event.key === 'Escape' && entryDraft) closeEntryEditor();
     };
     const onDocumentClick = (event: MouseEvent) => {
       if (event.target instanceof Element && event.target.closest('[data-detail-more]')) return;
@@ -522,18 +530,76 @@
     const timesheet = periodTimesheet(period);
     if (!timesheet) return;
     const entry = emptyTimesheetEntry();
+    entry.date = `${period.year}-${String(period.month).padStart(2, '0')}-01`;
     entry.description = workspace.clients.find((client) => client.id === period.clientId)?.defaultServiceDescription || `${monthName(period.month)} work`;
-    timesheet.entries = [...timesheet.entries, entry];
-    addActivity(activity(`Added hours to ${clientName(workspace.clients, period.clientId)} ${periodTitle(period)}`, 'updated', period.id));
-    touch('Hours added');
+    openEntryEditor(entry, true);
   }
 
-  function removeEntry(period: BillingPeriod, entryId: string) {
+  function cloneEntry(entry: TimesheetEntry): TimesheetEntry {
+    return { ...entry };
+  }
+
+  function entryDraftChanged() {
+    return Boolean(entryDraft && JSON.stringify(entryDraft) !== JSON.stringify(entryDraftOriginal));
+  }
+
+  function openEntryEditor(entry: TimesheetEntry, isNew = false) {
+    if (entryDraftChanged() && !confirm('Discard unsaved entry changes?')) return;
+    entryDraft = cloneEntry(entry);
+    entryDraftOriginal = cloneEntry(entry);
+    entryDraftIsNew = isNew;
+    editingEntryId = isNew ? '' : entry.id;
+  }
+
+  function closeEntryEditor(confirmUnsaved = true) {
+    if (confirmUnsaved && entryDraftChanged() && !confirm('Discard unsaved entry changes?')) return;
+    entryDraft = undefined;
+    entryDraftOriginal = undefined;
+    entryDraftIsNew = false;
+    editingEntryId = '';
+  }
+
+  function saveEntryDraft(period: BillingPeriod) {
+    const timesheet = periodTimesheet(period);
+    if (!timesheet || !entryDraft) return;
+    const error = timeEntryError(entryDraft);
+    if (error) {
+      showToast(error);
+      return;
+    }
+    const wasNew = entryDraftIsNew;
+    if (wasNew) {
+      timesheet.entries = [...timesheet.entries, cloneEntry(entryDraft)];
+      addActivity(activity(`Added hours to ${clientName(workspace.clients, period.clientId)} ${periodTitle(period)}`, 'updated', period.id));
+    } else {
+      timesheet.entries = timesheet.entries.map((entry) => (entry.id === entryDraft?.id ? cloneEntry(entryDraft) : entry));
+    }
+    editingEntryId = entryDraft.id;
+    entryDraftOriginal = cloneEntry(entryDraft);
+    entryDraftIsNew = false;
+    touch('Timesheet saved');
+    showToast(wasNew ? 'Entry added' : 'Entry saved');
+    closeEntryEditor(false);
+  }
+
+  function removeEntry(period: BillingPeriod, entryId: string, confirmDelete = true) {
     const timesheet = periodTimesheet(period);
     if (!timesheet) return;
+    if (confirmDelete && !confirm('Delete this entry?')) return;
     timesheet.entries = timesheet.entries.filter((entry) => entry.id !== entryId);
+    if (editingEntryId === entryId || entryDraft?.id === entryId) closeEntryEditor(false);
     touch('Entry removed');
     showToast('Entry removed');
+  }
+
+  function deleteEntryDraft(period: BillingPeriod) {
+    if (!entryDraft) return;
+    if (!confirm('Delete this entry?')) return;
+    if (entryDraftIsNew) {
+      closeEntryEditor(false);
+      return;
+    }
+    removeEntry(period, entryDraft.id, false);
   }
 
   function deleteTimesheetPeriod(period: BillingPeriod) {
@@ -569,10 +635,6 @@
     showToast('Invoice deleted');
   }
 
-  function eventChecked(event: Event) {
-    return (event.currentTarget as HTMLInputElement).checked;
-  }
-
   function eventValue(event: Event) {
     return (event.currentTarget as HTMLInputElement).value;
   }
@@ -581,41 +643,22 @@
     return Number((event.currentTarget as HTMLInputElement).value || 0);
   }
 
-  function commitEntryChange(entry: TimesheetEntry) {
-    const timesheet = selectedTimesheet;
-    if (!timesheet) {
-      workspace = { ...workspace };
-      return;
-    }
-    const nextTimesheet = {
-      ...timesheet,
-      entries: timesheet.entries.map((item) => (item.id === entry.id ? { ...entry } : item))
-    };
-    workspace = {
-      ...workspace,
-      timesheets: workspace.timesheets.map((item) => (item.id === nextTimesheet.id ? nextTimesheet : item))
-    };
+  function setDraftTimeMode(useTime: boolean) {
+    if (!entryDraft) return;
+    entryDraft.timeTrackingMode = useTime ? 'time' : 'duration';
+    if (useTime && !timeEntryError(entryDraft)) syncEntryDurationFromTime(entryDraft);
   }
 
-  function setEntryTimeMode(entry: TimesheetEntry, useTime: boolean) {
-    entry.timeTrackingMode = useTime ? 'time' : 'duration';
-    if (useTime && !timeEntryError(entry)) syncEntryDurationFromTime(entry);
-    commitEntryChange(entry);
-    touch('Timesheet saved');
+  function updateDraftHours(hours: number) {
+    if (!entryDraft) return;
+    entryDraft.hours = hours;
   }
 
-  function updateEntryHours(entry: TimesheetEntry, hours: number) {
-    entry.hours = hours;
-    commitEntryChange(entry);
-    touch('Timesheet saved');
-  }
-
-  function updateEntryTiming(entry: TimesheetEntry, field: 'startTime' | 'endTime' | 'breakMinutes', value: string | number) {
-    if (field === 'breakMinutes') entry.breakMinutes = Number(value || 0);
-    else entry[field] = String(value);
-    if (!timeEntryError(entry)) syncEntryDurationFromTime(entry);
-    commitEntryChange(entry);
-    touch('Timesheet saved');
+  function updateDraftTiming(field: 'startTime' | 'endTime' | 'breakMinutes', value: string | number) {
+    if (!entryDraft) return;
+    if (field === 'breakMinutes') entryDraft.breakMinutes = Number(value || 0);
+    else entryDraft[field] = String(value);
+    if (!timeEntryError(entryDraft)) syncEntryDurationFromTime(entryDraft);
   }
 
   function timeValue(value: string) {
@@ -642,6 +685,24 @@
   function entryDurationSummary(entry: TimesheetEntry) {
     const duration = formatHours(entryMinutes(entry));
     return entry.timeTrackingMode === 'time' && entry.startTime && entry.endTime ? `${entry.startTime}–${entry.endTime} · ${duration}` : duration;
+  }
+
+  function entryModeLabel(entry: TimesheetEntry) {
+    return entry.timeTrackingMode === 'time' ? 'Time' : 'Hours';
+  }
+
+  function entryAmount(entry: TimesheetEntry) {
+    return selectedTimesheet && entry.billable ? formatMoney((entryMinutes(entry) / 60) * selectedTimesheet.hourlyRate, selectedTimesheet.currency) : '—';
+  }
+
+  function entryDateLabel(date: string) {
+    const value = new Date(`${date}T12:00:00`);
+    return Number.isNaN(value.getTime()) ? date : value.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+
+  function entryDayLabel(date: string) {
+    const value = new Date(`${date}T12:00:00`);
+    return Number.isNaN(value.getTime()) ? '' : value.toLocaleDateString('en-GB', { weekday: 'short' });
   }
 
   function updateClientNotes(client: Client) {
@@ -1197,42 +1258,98 @@
             </div>
             <div class="section-title">
               <h2>Entries</h2>
-              <button onclick={() => addEntry(selectedPeriod)}><Plus size={16} /> Add Hours</button>
+              <button onclick={() => addEntry(selectedPeriod)}><Plus size={16} /> Add Entry</button>
             </div>
-            <div class="entry-list" oninput={() => touch('Timesheet saved')}>
-              <div class="entry-list-header" aria-hidden="true">
-                <span>Date</span>
-                <span class="time-heading">Hours / Time</span>
-                <span>Billable</span>
-                <span>Total</span>
-                <span>Mode</span>
-                <span></span>
-              </div>
-              {#each selectedTimesheet.entries as entry}
-                <div class:time-entry={entry.timeTrackingMode === 'time'} class="entry-grid">
-                  <label class="date-field"><span class="sr-only">Date</span><input type="date" aria-label="Date" bind:value={entry.date} /></label>
-                  {#if entry.timeTrackingMode === 'time'}
-                    <label class="start-field"><span class="sr-only">Start time</span><input type="time" aria-label="Start time" value={entry.startTime} oninput={(event) => updateEntryTiming(entry, 'startTime', eventValue(event))} /></label>
-                    <label class="end-field"><span class="sr-only">End time</span><input type="time" aria-label="End time" value={entry.endTime} oninput={(event) => updateEntryTiming(entry, 'endTime', eventValue(event))} /></label>
-                    <label class="break-field"><span class="sr-only">Break minutes</span><input type="number" aria-label="Break minutes" min="0" step="5" value={entry.breakMinutes} oninput={(event) => updateEntryTiming(entry, 'breakMinutes', eventNumber(event))} /></label>
-                  {:else}
-                    <label class="hours-field"><span class="sr-only">Hours</span><input type="number" aria-label="Hours" min="0" step="0.25" value={entry.hours} oninput={(event) => updateEntryHours(entry, eventNumber(event))} /></label>
-                  {/if}
-                  <label class="check billable-field"><input type="checkbox" aria-label="Billable" bind:checked={entry.billable} onchange={() => touch('Timesheet saved')} /> Billable</label>
-                  <label class="description"><span class="sr-only">Work description</span><textarea rows="2" aria-label="Work description" placeholder="Work description" bind:value={entry.description}></textarea></label>
-                  <div class:error={Boolean(timeEntryError(entry))} class="duration entry-total">
-                    <span>{entry.timeTrackingMode === 'time' && timeEntryError(entry) ? calculatedEntryDuration(entry) : entryDurationSummary(entry)}</span>
-                    {#if timeEntryError(entry)}
-                      <small>{timeEntryError(entry)}</small>
-                    {/if}
-                  </div>
-                  <label class="check time-toggle">
-                    <input type="checkbox" checked={entry.timeTrackingMode === 'time'} onchange={(event) => setEntryTimeMode(entry, eventChecked(event))} />
-                    Time
-                  </label>
-                  <button class="icon danger-icon" aria-label="Delete entry" onclick={() => removeEntry(selectedPeriod, entry.id)}><Trash2 size={16} /></button>
+            <div class:has-editor={Boolean(entryDraft)} class="entries-workspace">
+              <div class="entry-list">
+                <div class="entry-list-header" aria-hidden="true">
+                  <span>Date</span>
+                  <span>Time / Hours</span>
+                  <span>Billable</span>
+                  <span>Total</span>
+                  <span>Mode</span>
+                  <span>Actions</span>
                 </div>
-              {/each}
+                {#if selectedTimesheet.entries.length}
+                  {#each selectedTimesheet.entries as entry}
+                    <div class:active={editingEntryId === entry.id} class="entry-summary-row">
+                      <button class="entry-summary-main" aria-label={`Edit entry for ${entryDateLabel(entry.date)}`} onclick={() => openEntryEditor(entry)}>
+                        <span class="entry-date">
+                          <strong>{entryDateLabel(entry.date)}</strong>
+                          <small>{entryDayLabel(entry.date)}</small>
+                        </span>
+                        <span>
+                          <strong>{entryDurationSummary(entry)}</strong>
+                          {#if entry.description}
+                            <small>{entry.description}</small>
+                          {/if}
+                        </span>
+                        <span class:muted={!entry.billable}>{entry.billable ? 'Billable' : 'Non-billable'}</span>
+                        <span>{entryAmount(entry)}</span>
+                        <span>{entryModeLabel(entry)}</span>
+                      </button>
+                      <div class="entry-row-actions">
+                        <button class="secondary compact" onclick={() => openEntryEditor(entry)}>Edit</button>
+                        <button class="icon danger-icon" aria-label="Delete entry" onclick={() => removeEntry(selectedPeriod, entry.id)}><Trash2 size={16} /></button>
+                      </div>
+                    </div>
+                  {/each}
+                {:else}
+                  <div class="entry-list-empty">
+                    <p>No entries yet.</p>
+                    <button onclick={() => addEntry(selectedPeriod)}><Plus size={16} /> Add Entry</button>
+                  </div>
+                {/if}
+              </div>
+
+              {#if entryDraft}
+                <aside class="entry-editor-panel" aria-label="Timesheet entry editor">
+                  <div class="editor-head compact-head">
+                    <div>
+                      <span>{entryDraftIsNew ? 'New entry' : 'Editing entry'}</span>
+                      <h3>{entryDraft.date ? entryDateLabel(entryDraft.date) : 'Timesheet entry'}</h3>
+                    </div>
+                    <button class="secondary compact" onclick={() => closeEntryEditor()}>Close</button>
+                  </div>
+
+                  <div class="entry-editor-form">
+                    <label>Date <input type="date" bind:value={entryDraft.date} /></label>
+                    <label>Mode
+                      <select value={entryDraft.timeTrackingMode} onchange={(event) => setDraftTimeMode(eventValue(event) === 'time')}>
+                        <option value="duration">Hours only</option>
+                        <option value="time">Start / End time</option>
+                      </select>
+                    </label>
+
+                    {#if entryDraft.timeTrackingMode === 'time'}
+                      <div class="time-editor-grid">
+                        <label>Start <input type="time" value={entryDraft.startTime} oninput={(event) => updateDraftTiming('startTime', eventValue(event))} /></label>
+                        <label>End <input type="time" value={entryDraft.endTime} oninput={(event) => updateDraftTiming('endTime', eventValue(event))} /></label>
+                        <label>Break <input type="number" min="0" step="5" value={entryDraft.breakMinutes} oninput={(event) => updateDraftTiming('breakMinutes', eventNumber(event))} /></label>
+                      </div>
+                      <div class:error={Boolean(timeEntryError(entryDraft))} class="duration editor-total">
+                        <span>Calculated: {calculatedEntryDuration(entryDraft)}</span>
+                        {#if timeEntryError(entryDraft)}
+                          <small>{timeEntryError(entryDraft)}</small>
+                        {/if}
+                      </div>
+                    {:else}
+                      <label>Hours <input type="number" min="0" step="0.25" value={entryDraft.hours} oninput={(event) => updateDraftHours(eventNumber(event))} /></label>
+                    {/if}
+
+                    <label class="inline-check"><input type="checkbox" bind:checked={entryDraft.billable} /> Billable</label>
+                    <label class="wide">Description <textarea rows="5" placeholder="Work description" bind:value={entryDraft.description}></textarea></label>
+                  </div>
+
+                  <div class="entry-editor-actions">
+                    <button class="danger secondary-danger" onclick={() => deleteEntryDraft(selectedPeriod)}><Trash2 size={16} /> Delete entry</button>
+                    <div class="actions">
+                      <button class="secondary" onclick={() => closeEntryEditor()}>Cancel</button>
+                      <button onclick={() => saveEntryDraft(selectedPeriod)}><CheckCircle2 size={16} /> Save changes</button>
+                    </div>
+                  </div>
+                </aside>
+              {/if}
             </div>
           </section>
         </section>

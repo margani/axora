@@ -55,6 +55,12 @@ button.secondary:hover {
   background: #d8d0c2;
 }
 
+button.compact {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 0.84rem;
+}
+
 button.danger,
 button.danger-icon {
   background: #8f3535;
@@ -853,25 +859,23 @@ button.context-link:hover {
 
 .entry-list {
   display: grid;
-  gap: 6px;
-  padding: 8px;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
   border-radius: 8px;
-  background: #faf8f3;
+  background: #fbfaf6;
 }
 
 .entry-list-header {
   display: grid;
-  grid-template-columns: minmax(136px, 0.8fr) repeat(3, minmax(132px, 0.8fr)) 96px minmax(140px, 0.85fr) 72px 36px;
-  gap: 14px;
-  padding: 2px 10px 4px;
+  grid-template-columns: minmax(120px, 0.9fr) minmax(170px, 1.35fr) minmax(96px, 0.75fr) minmax(104px, 0.8fr) minmax(76px, 0.55fr) 116px;
+  gap: 12px;
+  align-items: center;
+  padding: 2px 12px 4px;
   color: #65706c;
   font-size: 0.72rem;
   font-weight: 800;
   text-transform: uppercase;
-}
-
-.entry-list-header .time-heading {
-  grid-column: 2 / span 3;
 }
 
 .sr-only {
@@ -886,13 +890,179 @@ button.context-link:hover {
   border: 0;
 }
 
-.entry-grid {
+.entries-workspace {
   display: grid;
-  gap: 10px 14px;
+  gap: 14px;
+}
+
+.entries-workspace.has-editor {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+  align-items: start;
+}
+
+.entry-summary-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
   align-items: center;
-  padding: 10px 10px 11px;
+  padding: 8px 8px 8px 10px;
   border-radius: 8px;
-  background: #fffdf9;
+  background: #fffefa;
+  box-shadow: inset 0 0 0 1px rgb(222 216 202 / 0.46);
+}
+
+.entry-summary-row:hover {
+  background: #f8fbf7;
+  box-shadow: inset 0 0 0 1px #cfe3d8;
+}
+
+.entry-summary-row.active {
+  background: #f4faf6;
+  box-shadow: inset 3px 0 0 #1f6f68, inset 0 0 0 1px #b7d4c8;
+}
+
+.entry-summary-main {
+  min-height: 54px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(110px, 0.9fr) minmax(170px, 1.35fr) minmax(94px, 0.75fr) minmax(104px, 0.8fr) minmax(70px, 0.55fr);
+  gap: 12px;
+  align-items: center;
+  justify-content: stretch;
+  text-align: left;
+  color: #1d2525;
+  background: transparent;
+}
+
+.entry-summary-main:hover {
+  background: transparent;
+}
+
+.entry-summary-main span,
+.entry-summary-main strong,
+.entry-summary-main small {
+  display: block;
+  min-width: 0;
+}
+
+.entry-summary-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entry-summary-main small {
+  margin-top: 2px;
+  color: #65706c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+}
+
+.entry-summary-main .muted {
+  color: #65706c;
+}
+
+.entry-date strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.entry-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.entry-list-empty {
+  min-height: 142px;
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  padding: 22px;
+  color: #65706c;
+  border-radius: 8px;
+  background: #fffefa;
+}
+
+.entry-editor-panel {
+  position: sticky;
+  top: 18px;
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid #ded8ca;
+  border-radius: 8px;
+  background: #fffdf8;
+  box-shadow: 0 16px 32px rgb(29 37 37 / 0.08);
+}
+
+.compact-head {
+  align-items: start;
+}
+
+.compact-head span {
+  color: #65706c;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.compact-head h3 {
+  margin-top: 2px;
+  font-size: 1.12rem;
+}
+
+.entry-editor-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.entry-editor-form input,
+.entry-editor-form textarea,
+.entry-editor-form select {
+  border-color: #ded8ca;
+  background: #fffefa;
+}
+
+.entry-editor-form input[type='time'],
+.entry-editor-form input[type='number'] {
+  min-width: 0;
+  padding-inline: 12px 16px;
+}
+
+.time-editor-grid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.editor-total {
+  grid-column: 1 / -1;
+  min-height: 42px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: #f4faf6;
+}
+
+.entry-editor-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  padding-top: 2px;
+}
+
+.secondary-danger {
+  background: #f7e7e3;
+  color: #8f3535;
+}
+
+.secondary-danger:hover {
+  background: #edd2cb;
+  color: #742929;
 }
 
 .item-grid {
@@ -903,98 +1073,6 @@ button.context-link:hover {
   border: 1px solid #e1dacd;
   border-radius: 8px;
   background: #f9f6ef;
-}
-
-.entry-grid {
-  grid-template-columns: minmax(136px, 0.8fr) repeat(3, minmax(132px, 0.8fr)) 96px minmax(140px, 0.85fr) 72px 36px;
-}
-
-.entry-grid.time-entry {
-  grid-template-columns: minmax(136px, 0.8fr) repeat(3, minmax(132px, 0.8fr)) 96px minmax(140px, 0.85fr) 72px 36px;
-}
-
-.entry-grid .description {
-  grid-column: 1 / -1;
-  grid-row: 2;
-}
-
-.entry-grid .description textarea {
-  min-height: 38px;
-  max-height: 88px;
-  line-height: 1.35;
-  resize: vertical;
-  background: #fffefe;
-}
-
-.entry-grid input[type='time'],
-.entry-grid input[type='number'] {
-  min-width: 0;
-  padding-inline: 12px 16px;
-}
-
-.entry-grid input[type='time'] {
-  min-width: 124px;
-  padding-right: 18px;
-}
-
-.entry-grid input,
-.entry-grid textarea {
-  min-height: 36px;
-  padding-block: 8px;
-  border-color: #e4ded2;
-  background: #fffefe;
-}
-
-.entry-grid input:hover,
-.entry-grid textarea:hover {
-  border-color: #d5ccbe;
-}
-
-.entry-grid input:focus,
-.entry-grid textarea:focus {
-  border-color: #b7d4c8;
-  outline: 2px solid rgb(183 212 200 / 0.28);
-  outline-offset: 0;
-  background: #fffdf8;
-}
-
-.entry-grid .time-toggle {
-  grid-column: 7;
-  justify-content: center;
-  min-height: 36px;
-}
-
-.entry-grid .date-field {
-  grid-column: 1;
-}
-
-.entry-grid .hours-field,
-.entry-grid .start-field {
-  grid-column: 2;
-}
-
-.entry-grid .hours-field {
-  grid-column: 2 / span 2;
-}
-
-.entry-grid .end-field {
-  grid-column: 3;
-}
-
-.entry-grid .break-field {
-  grid-column: 4;
-}
-
-.entry-grid .billable-field {
-  grid-column: 5;
-}
-
-.entry-grid .entry-total {
-  grid-column: 6;
-}
-
-.entry-grid .danger-icon {
-  grid-column: 8;
 }
 
 .item-grid {
@@ -1265,27 +1343,12 @@ button.context-link:hover {
     display: none;
   }
 
-  .entry-grid,
-  .entry-grid.time-entry {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .entries-workspace.has-editor {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
   }
 
-  .entry-grid .description,
-  .entry-grid .time-toggle,
-  .entry-grid .entry-total {
-    grid-column: 1 / -1;
-    grid-row: auto;
-  }
-
-  .entry-grid .date-field,
-  .entry-grid .hours-field,
-  .entry-grid .start-field,
-  .entry-grid .end-field,
-  .entry-grid .break-field,
-  .entry-grid .billable-field,
-  .entry-grid .danger-icon {
-    grid-column: auto;
-    grid-row: auto;
+  .entry-summary-main {
+    grid-template-columns: minmax(96px, 0.8fr) minmax(140px, 1.2fr) minmax(84px, 0.75fr) minmax(92px, 0.8fr) minmax(64px, 0.55fr);
   }
 }
 
@@ -1324,7 +1387,8 @@ button.context-link:hover {
   .billing-layout,
   .client-summary,
   .overview-grid,
-  .detail-card {
+  .detail-card,
+  .entries-workspace.has-editor {
     display: grid;
     grid-template-columns: 1fr;
   }
@@ -1344,34 +1408,16 @@ button.context-link:hover {
     display: grid;
   }
 
-  .entry-grid,
-  .entry-grid.time-entry,
   .item-grid {
     grid-template-columns: 1fr 1fr;
   }
 
-  .description,
-  .entry-grid .time-toggle,
-  .item-grid label:first-child,
-  .entry-grid .entry-total {
+  .item-grid label:first-child {
     grid-column: 1 / -1;
   }
 
-  .entry-grid .date-field,
-  .entry-grid .hours-field,
-  .entry-grid .start-field,
-  .entry-grid .end-field,
-  .entry-grid .break-field,
-  .entry-grid .billable-field,
-  .entry-grid .danger-icon {
-    grid-column: auto;
-    grid-row: auto;
-  }
-
-  .entry-grid .description,
-  .entry-grid .time-toggle,
-  .entry-grid .duration {
-    grid-row: auto;
+  .entry-editor-panel {
+    position: static;
   }
 }
 
@@ -1384,10 +1430,26 @@ button.context-link:hover {
     display: none;
   }
 
-  .entry-grid,
-  .entry-grid.time-entry,
   .item-grid {
     grid-template-columns: 1fr;
+  }
+
+  .entry-summary-row,
+  .entry-summary-main,
+  .entry-editor-actions,
+  .time-editor-grid,
+  .entry-editor-form {
+    grid-template-columns: 1fr;
+  }
+
+  .entry-summary-row,
+  .entry-editor-actions {
+    display: grid;
+  }
+
+  .entry-row-actions,
+  .entry-editor-actions .actions {
+    justify-content: flex-start;
   }
 
   .search-box {
