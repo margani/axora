@@ -191,9 +191,15 @@ export function emptyWorkspace(): Workspace {
 
 export function loadWorkspace(): { workspace: Workspace; savedAt: string } {
   const raw = localStorage.getItem(STORAGE_KEY);
-  const savedAt = localStorage.getItem(SAVED_AT_KEY) ?? '';
   if (!raw) return { workspace: emptyWorkspace(), savedAt: '' };
-  return { workspace: normalizeWorkspace(JSON.parse(raw)), savedAt };
+  const parsed = JSON.parse(raw) as Partial<Workspace> & { lastSavedAt?: string; savedAt?: string };
+  let savedAt = parsed.lastSavedAt || parsed.savedAt || localStorage.getItem(SAVED_AT_KEY) || '';
+  if (!savedAt) {
+    savedAt = new Date().toISOString();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...parsed, version: 3, lastSavedAt: savedAt }));
+    localStorage.setItem(SAVED_AT_KEY, savedAt);
+  }
+  return { workspace: normalizeWorkspace(parsed), savedAt };
 }
 
 export function hasSavedWorkspace() {
@@ -202,7 +208,7 @@ export function hasSavedWorkspace() {
 
 export function saveWorkspace(workspace: Workspace) {
   const savedAt = new Date().toISOString();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...workspace, version: 3 }));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...workspace, version: 3, lastSavedAt: savedAt }));
   localStorage.setItem(SAVED_AT_KEY, savedAt);
   return savedAt;
 }
