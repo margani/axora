@@ -180,7 +180,6 @@
       saveStatus = 'saving';
       lastSaved = saveWorkspace(workspace);
       saveStatus = 'saved';
-      showToast(note);
     }, 250);
   }
 
@@ -381,7 +380,7 @@
     activeView = 'timesheetDetail';
     const path = timesheetPath(period);
     if (window.location.pathname !== path) history.pushState({}, '', path);
-    showToast(`Opened ${periodTitle(period)} Timesheet`);
+    clearToast();
   }
 
   function openInvoice(invoice: Invoice) {
@@ -392,7 +391,7 @@
     activeView = 'invoiceDetail';
     const path = invoicePath(invoice);
     if (window.location.pathname !== path) history.pushState({}, '', path);
-    showToast(`Opened Invoice ${invoice.invoiceNumber}`);
+    clearToast();
   }
 
   function backToClientTab(client: Client, tab: ClientTab) {
@@ -435,6 +434,7 @@
     period.status = invoice.status === 'paid' ? 'paid' : 'invoiced';
     addActivity(activity(`Created Invoice ${invoice.invoiceNumber}`, 'invoice', period.id));
     touch('Invoice generated');
+    showToast('Invoice generated');
   }
 
   function createStandaloneInvoice(client: Client) {
@@ -456,6 +456,7 @@
     workspace.invoices = [copy, ...workspace.invoices];
     addActivity(activity(`Duplicated Invoice ${invoice.invoiceNumber}`, 'invoice'));
     touch('Invoice duplicated');
+    showToast('Invoice duplicated');
   }
 
   function generatePeriodPdf(period: BillingPeriod) {
@@ -472,6 +473,7 @@
     }
     addActivity(activity(`Generated PDF for ${clientName(workspace.clients, period.clientId)} ${periodTitle(period)}`, 'pdf', period.id));
     touch('PDF generated');
+    showToast('PDF generated');
   }
 
   function generateInvoicePdfOnly(invoice: Invoice) {
@@ -479,6 +481,7 @@
     invoice.lastPdfGeneratedAt = new Date().toISOString();
     addActivity(activity(`Generated PDF for ${invoice.invoiceNumber}`, 'pdf'));
     touch('Invoice PDF generated');
+    showToast('Invoice PDF generated');
   }
 
   function markInvoicePaid(invoice: Invoice) {
@@ -487,6 +490,7 @@
     if (period) period.status = 'paid';
     addActivity(activity(`Marked Invoice ${invoice.invoiceNumber} paid`, 'payment', period?.id));
     touch('Invoice marked paid');
+    showToast('Invoice marked paid');
   }
 
   function archiveInvoiceForClient(invoice: Invoice, archived = true) {
@@ -495,6 +499,7 @@
     if (period) period.archived = archived;
     addActivity(activity(`${archived ? 'Archived' : 'Restored'} Invoice ${invoice.invoiceNumber}`, 'archive', period?.id));
     touch(archived ? 'Invoice archived' : 'Invoice restored');
+    showToast(archived ? 'Invoice archived' : 'Invoice restored');
   }
 
   function archivePeriod(period: BillingPeriod, archived = true) {
@@ -503,6 +508,7 @@
     if (timesheet) timesheet.archived = archived;
     addActivity(activity(`${archived ? 'Archived' : 'Restored'} ${clientName(workspace.clients, period.clientId)} ${periodTitle(period)}`, 'archive', period.id));
     touch(archived ? 'Timesheet archived' : 'Timesheet restored');
+    showToast(archived ? 'Timesheet archived' : 'Timesheet restored');
   }
 
   function addEntry(period: BillingPeriod) {
@@ -520,6 +526,7 @@
     if (!timesheet) return;
     timesheet.entries = timesheet.entries.filter((entry) => entry.id !== entryId);
     touch('Entry removed');
+    showToast('Entry removed');
   }
 
   function deleteTimesheetPeriod(period: BillingPeriod) {
@@ -535,6 +542,7 @@
     addActivity(activity(`Deleted ${periodTitle(period)} timesheet for ${client.name || 'client'}`, 'updated'));
     backToClientTab(client, 'timesheets');
     touch('Timesheet deleted');
+    showToast('Timesheet deleted');
   }
 
   function deleteInvoiceForClient(invoice: Invoice) {
@@ -551,6 +559,7 @@
     addActivity(activity(`Deleted Invoice ${invoice.invoiceNumber}`, 'updated'));
     backToClientTab(client, 'invoices');
     touch('Invoice deleted');
+    showToast('Invoice deleted');
   }
 
   function eventChecked(event: Event) {
@@ -1175,30 +1184,37 @@
               <button onclick={() => addEntry(selectedPeriod)}><Plus size={16} /> Add Hours</button>
             </div>
             <div class="entry-list" oninput={() => touch('Timesheet saved')}>
+              <div class="entry-list-header" aria-hidden="true">
+                <span>Date</span>
+                <span class="time-heading">Hours / Time</span>
+                <span>Billable</span>
+                <span>Description</span>
+                <span>Total</span>
+                <span>Mode</span>
+                <span></span>
+              </div>
               {#each selectedTimesheet.entries as entry}
                 <div class:time-entry={entry.timeTrackingMode === 'time'} class="entry-grid">
-                  <label class="date-field">Date <input type="date" bind:value={entry.date} /></label>
+                  <label class="date-field"><span class="sr-only">Date</span><input type="date" aria-label="Date" bind:value={entry.date} /></label>
                   {#if entry.timeTrackingMode === 'time'}
-                    <label class="start-field">Start <input type="time" value={entry.startTime} oninput={(event) => updateEntryTiming(entry, 'startTime', eventValue(event))} /></label>
-                    <label class="end-field">End <input type="time" value={entry.endTime} oninput={(event) => updateEntryTiming(entry, 'endTime', eventValue(event))} /></label>
-                    <label class="break-field">Break <input type="number" min="0" step="5" value={entry.breakMinutes} oninput={(event) => updateEntryTiming(entry, 'breakMinutes', eventNumber(event))} /></label>
-                    <div class:error={Boolean(timeEntryError(entry))} class="calculated-duration">
-                      <span>Duration</span>
-                      <strong>{calculatedEntryDuration(entry)}</strong>
-                      {#if timeEntryError(entry)}
-                        <small>{timeEntryError(entry)}</small>
-                      {/if}
-                    </div>
+                    <label class="start-field"><span class="sr-only">Start time</span><input type="time" aria-label="Start time" value={entry.startTime} oninput={(event) => updateEntryTiming(entry, 'startTime', eventValue(event))} /></label>
+                    <label class="end-field"><span class="sr-only">End time</span><input type="time" aria-label="End time" value={entry.endTime} oninput={(event) => updateEntryTiming(entry, 'endTime', eventValue(event))} /></label>
+                    <label class="break-field"><span class="sr-only">Break minutes</span><input type="number" aria-label="Break minutes" min="0" step="5" value={entry.breakMinutes} oninput={(event) => updateEntryTiming(entry, 'breakMinutes', eventNumber(event))} /></label>
                   {:else}
-                    <label class="hours-field">Hours <input type="number" min="0" step="0.25" value={entry.hours} oninput={(event) => updateEntryHours(entry, eventNumber(event))} /></label>
+                    <label class="hours-field"><span class="sr-only">Hours</span><input type="number" aria-label="Hours" min="0" step="0.25" value={entry.hours} oninput={(event) => updateEntryHours(entry, eventNumber(event))} /></label>
                   {/if}
-                  <label class="check"><input type="checkbox" bind:checked={entry.billable} onchange={() => touch('Timesheet saved')} /> Billable</label>
-                  <label class="description">Description <textarea rows="2" bind:value={entry.description}></textarea></label>
+                  <label class="check billable-field"><input type="checkbox" aria-label="Billable" bind:checked={entry.billable} onchange={() => touch('Timesheet saved')} /> Billable</label>
+                  <label class="description"><span class="sr-only">Work description</span><textarea rows="2" aria-label="Work description" placeholder="Work description" bind:value={entry.description}></textarea></label>
+                  <div class:error={Boolean(timeEntryError(entry))} class="duration entry-total">
+                    <span>{entry.timeTrackingMode === 'time' && timeEntryError(entry) ? calculatedEntryDuration(entry) : entryDurationSummary(entry)}</span>
+                    {#if timeEntryError(entry)}
+                      <small>{timeEntryError(entry)}</small>
+                    {/if}
+                  </div>
                   <label class="check time-toggle">
                     <input type="checkbox" checked={entry.timeTrackingMode === 'time'} onchange={(event) => setEntryTimeMode(entry, eventChecked(event))} />
-                    Use start/end time
+                    Time
                   </label>
-                  <span class="duration">{entryDurationSummary(entry)}</span>
                   <button class="icon danger-icon" aria-label="Delete entry" onclick={() => removeEntry(selectedPeriod, entry.id)}><Trash2 size={16} /></button>
                 </div>
               {/each}
