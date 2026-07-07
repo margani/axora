@@ -20,6 +20,16 @@
   import type { ActivityEvent, BillingPeriod, Client, Invoice, TimesheetEntry, Workspace } from '$lib/types';
   import { generateInvoicePdf, generateTimesheetPdf } from '$lib/pdf';
   import {
+    dirtySaveState,
+    errorSaveState,
+    initialSaveState,
+    savedSaveState,
+    saveStatusBadge,
+    saveStatusText,
+    savingSaveState,
+    type SaveState
+  } from '$lib/saveStatus';
+  import {
     activity,
     addDays,
     billableMinutes,
@@ -57,10 +67,6 @@
   type ClientTab = 'overview' | 'timesheets' | 'invoices' | 'notes' | 'settings';
   type SortOrder = 'newest' | 'oldest';
   type DetailMenu = '' | 'timesheet' | 'invoice';
-  type SaveState = {
-    status: 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
-    lastSavedAt: string | null;
-  };
 
   let workspace: Workspace = emptyWorkspace();
   let activeView: View = 'dashboard';
@@ -188,7 +194,7 @@
       workspace = demoWorkspace();
     }
 
-    saveState = hasSavedData && loaded.savedAt ? { status: 'saved', lastSavedAt: loaded.savedAt } : { status: 'idle', lastSavedAt: null };
+    saveState = hasSavedData ? initialSaveState(loaded.savedAt) : initialSaveState();
     selectedClientId = workspace.clients[0]?.id ?? '';
     selectedPeriodId = clientPeriods(selectedClientId)[0]?.id ?? '';
     activeView = viewFromPath(window.location.pathname);
@@ -197,21 +203,21 @@
 
   function touch(note = 'Saved locally') {
     if (!ready) return;
-    saveState = { ...saveState, status: 'dirty' };
+    saveState = dirtySaveState(saveState);
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      saveState = { ...saveState, status: 'saving' };
+      saveState = savingSaveState(saveState);
       try {
         persistWorkspace();
       } catch (error) {
-        saveState = { ...saveState, status: 'error' };
+        saveState = errorSaveState(saveState);
         showToast(error instanceof Error ? error.message : 'Could not save workspace.');
       }
     }, 250);
   }
 
   function persistWorkspace() {
-    saveState = { status: 'saved', lastSavedAt: saveWorkspace(workspace) };
+    saveState = savedSaveState(saveWorkspace(workspace));
   }
 
   function showToast(note: string) {
@@ -791,26 +797,9 @@
     workspace = emptyWorkspace();
     selectedClientId = workspace.clients[0]?.id ?? '';
     selectedPeriodId = clientPeriods(selectedClientId)[0]?.id ?? '';
-    saveState = { status: 'idle', lastSavedAt: null };
+    saveState = initialSaveState();
     clearConfirmOpen = false;
     showToast('Local data cleared.');
-  }
-
-  function savedLabel() {
-    if (!saveState.lastSavedAt) return 'Not saved yet';
-    if (Date.now() - new Date(saveState.lastSavedAt).getTime() < 60_000) return 'just now';
-    return new Date(saveState.lastSavedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
-  }
-
-  function saveStatusText() {
-    if (saveState.status === 'saving') return 'Saving...';
-    if (saveState.status === 'error') return 'Save failed';
-    return `Last saved: ${savedLabel()}`;
-  }
-
-  function saveStatusLabel() {
-    if (saveState.status !== 'saved' || !saveState.lastSavedAt) return '';
-    return 'Saved ✓';
   }
 
   function formatDateTime(value: string) {
@@ -931,9 +920,9 @@
                   : 'Settings'}
         </h1>
         <p>
-          {saveStatusText()}
-          {#if saveStatusLabel()}
-            <span class="save-status {saveState.status}">{saveStatusLabel()}</span>
+          {saveStatusText(saveState)}
+          {#if saveStatusBadge(saveState)}
+            <span class="save-status {saveState.status}">{saveStatusBadge(saveState)}</span>
           {/if}
         </p>
       </div>
