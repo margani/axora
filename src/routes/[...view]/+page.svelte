@@ -1089,10 +1089,11 @@
           </div>
 
           <section class="tab-panel workspace-detail">
-            <div class="detail-context">
-              <button class="secondary" onclick={() => backToClientTab(selectedClient, 'timesheets')}>Back to timesheets</button>
-              <span>Timesheets / {periodTitle(selectedPeriod)}</span>
-            </div>
+            <nav class="detail-context" aria-label="Timesheet location">
+              <button class="context-link" onclick={() => backToClientTab(selectedClient, 'timesheets')}>← Timesheets</button>
+              <span>/</span>
+              <strong>{periodTitle(selectedPeriod)}</strong>
+            </nav>
             <div class="detail-card">
               <div>
                 <small>{periodInvoice(selectedPeriod)?.status ?? 'No invoice'}{selectedPeriod.archived ? ' · Archived' : ''}</small>
@@ -1140,7 +1141,7 @@
                     Use start/end time
                   </label>
                   <span class="duration">{entryDurationSummary(entry)}</span>
-                  <button class="icon danger-icon" onclick={() => removeEntry(selectedPeriod, entry.id)}><Trash2 size={16} /></button>
+                  <button class="icon danger-icon" aria-label="Delete entry" onclick={() => removeEntry(selectedPeriod, entry.id)}><Trash2 size={16} /></button>
                 </div>
               {/each}
             </div>
@@ -1173,10 +1174,11 @@
           </div>
 
           <section class="tab-panel workspace-detail">
-            <div class="detail-context">
-              <button class="secondary" onclick={() => backToClientTab(selectedClient, 'invoices')}>Back to invoices</button>
-              <span>Invoices / {selectedInvoice.invoiceNumber}</span>
-            </div>
+            <nav class="detail-context" aria-label="Invoice location">
+              <button class="context-link" onclick={() => backToClientTab(selectedClient, 'invoices')}>← Invoices</button>
+              <span>/</span>
+              <strong>{selectedInvoice.invoiceNumber}</strong>
+            </nav>
             <div class="detail-card">
               <div>
                 <small>{selectedInvoice.status}{selectedInvoice.archived ? ' · Archived' : ''}</small>
@@ -1216,7 +1218,7 @@
                   <label>Quantity <input type="number" min="0" step="0.01" bind:value={item.quantity} /></label>
                   <label>Unit price <input type="number" min="0" step="0.01" bind:value={item.unitPrice} /></label>
                   <span class="duration">{formatMoney(Number(item.quantity || 0) * Number(item.unitPrice || 0), selectedInvoice.currency)}</span>
-                  <button class="icon danger-icon" onclick={() => { selectedInvoice.items = selectedInvoice.items.filter((row) => row.id !== item.id); touch('Item removed'); }}><Trash2 size={16} /></button>
+                  <button class="icon danger-icon" aria-label="Delete invoice item" onclick={() => { selectedInvoice.items = selectedInvoice.items.filter((row) => row.id !== item.id); touch('Item removed'); }}><Trash2 size={16} /></button>
                 </div>
               {/each}
               <button class="secondary" onclick={() => { selectedInvoice.items = [...selectedInvoice.items, emptyInvoiceItem()]; touch('Item added'); }}><Plus size={16} /> Add Invoice Item</button>

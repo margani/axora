@@ -58,11 +58,26 @@ button.secondary:hover {
 button.danger,
 button.danger-icon {
   background: #8f3535;
+  color: #fffdf8;
 }
 
 button.danger:hover,
 button.danger-icon:hover {
   background: #742929;
+}
+
+button.danger-icon svg {
+  color: #fffdf8;
+  stroke: currentColor;
+}
+
+button.danger-icon:disabled {
+  background: #8f3535;
+  color: #fffdf8;
+}
+
+button.danger-icon:disabled:hover {
+  background: #8f3535;
 }
 
 .app-shell {
@@ -710,13 +725,31 @@ textarea {
 .detail-context {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   color: #65706c;
+  font-size: 0.92rem;
   font-weight: 700;
 }
 
-.detail-context .secondary {
-  min-height: 36px;
+.detail-context strong {
+  color: #4a5551;
+  font-weight: 750;
+}
+
+button.context-link {
+  min-height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #1f6f68;
+  font-weight: 800;
+}
+
+button.context-link:hover {
+  background: transparent;
+  color: #185a55;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .detail-card {
