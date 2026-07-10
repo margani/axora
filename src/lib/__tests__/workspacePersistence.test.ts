@@ -26,7 +26,7 @@ describe('workspace persistence save timestamp', () => {
 
     const loaded = loadWorkspace();
     expect(loaded.savedAt).toBe(savedAt);
-    expect(loaded.workspace.clients[0]?.name).toBe('Example Client');
+    expect(loaded.workspace.clients[0]?.name).toBe('Acme Digital Ltd');
   });
 
   it('hydrates lastSavedAt from workspace payload if the legacy savedAt key is missing', () => {

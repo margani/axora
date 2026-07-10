@@ -6,6 +6,8 @@ import type {
   Currency,
   Invoice,
   InvoiceItem,
+  InvoiceSnapshot,
+  InvoiceStatus,
   InvoiceTemplate,
   Timesheet,
   TimesheetEntry,
@@ -35,7 +37,9 @@ export function clientDefaults(client: Client | undefined, workspace: Workspace)
     hourlyRate: Number(client?.defaultHourlyRate || 500),
     currency: client?.defaultCurrency || workspace.settings.currency || 'GBP',
     paymentTermsDays: Number(client?.defaultPaymentTermsDays || workspace.profile.paymentTermsDays || 14),
-    invoiceTemplate: isInvoiceTemplate(client?.defaultInvoiceTemplate) ? client.defaultInvoiceTemplate : workspace.settings.invoiceTemplate || 'classic'
+    invoiceTemplate: isInvoiceTemplate(client?.defaultInvoiceTemplate) ? client.defaultInvoiceTemplate : workspace.settings.invoiceTemplate || 'classic',
+    taxRate: Number(client?.defaultTaxRate ?? workspace.settings.defaultTaxRate ?? 0),
+    serviceDescription: client?.defaultServiceDescription || 'Professional services'
   };
 }
 
@@ -71,7 +75,9 @@ export function emptyClient(): Client {
     defaultCurrency: 'GBP',
     defaultPaymentTermsDays: 14,
     defaultInvoiceTemplate: '',
-    defaultServiceDescription: 'Professional services'
+    defaultServiceDescription: 'Professional services',
+    defaultTaxRate: 0,
+    archived: false
   };
 }
 
@@ -110,7 +116,7 @@ export function emptyInvoice(clientId = '', currency = 'GBP', template: InvoiceT
   const issueDate = todayIso();
   return {
     id: uid('invoice'),
-    invoiceNumber: nextInvoiceNumber([]),
+    invoiceNumber: '',
     clientId,
     issueDate,
     dueDate: addDays(issueDate, 14),
@@ -119,6 +125,14 @@ export function emptyInvoice(clientId = '', currency = 'GBP', template: InvoiceT
     template,
     items: [emptyInvoiceItem()],
     notes: 'Payment by bank transfer. Thank you.',
+    poReference: '',
+    discountPercent: 0,
+    taxRate: 0,
+    amountPaid: 0,
+    sentDate: '',
+    paidDate: '',
+    timesheetId: '',
+    snapshot: null,
     archived: false,
     lastPdfGeneratedAt: ''
   };
@@ -160,7 +174,7 @@ export function activity(message: string, type: ActivityEvent['type'] = 'updated
 
 export function emptyWorkspace(): Workspace {
   return {
-    version: 3,
+    version: 4,
     profile: {
       companyName: '',
       contactName: '',
@@ -184,7 +198,10 @@ export function emptyWorkspace(): Workspace {
     settings: {
       currency: 'GBP',
       invoiceTemplate: 'classic',
-      companyLogo: ''
+      companyLogo: '',
+      invoicePrefix: 'INV',
+      nextInvoiceNumber: 1,
+      defaultTaxRate: 0
     }
   };
 }
@@ -208,7 +225,7 @@ export function hasSavedWorkspace() {
 
 export function saveWorkspace(workspace: Workspace) {
   const savedAt = new Date().toISOString();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...workspace, version: 3, lastSavedAt: savedAt }));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...workspace, version: 4, lastSavedAt: savedAt }));
   localStorage.setItem(SAVED_AT_KEY, savedAt);
   return savedAt;
 }
@@ -221,21 +238,27 @@ export function clearWorkspace() {
 export function normalizeWorkspace(value: unknown): Workspace {
   if (!value || typeof value !== 'object') throw new Error('Workspace file is not valid JSON data.');
   const source = value as Partial<Workspace> & { version?: number };
-  if (source.version && source.version > 3) throw new Error('This workspace was created by a newer version of Axora.');
+  if (source.version && source.version > 4) throw new Error('This workspace was created by a newer version of Axora.');
   if (source.version && source.version < 1) throw new Error('Workspace version is not supported.');
   const empty = emptyWorkspace();
+  const invoices = Array.isArray(source.invoices) ? source.invoices.map(normalizeInvoice) : [];
+  const storedCounter = Number(source.settings?.nextInvoiceNumber);
+  const nextInvoiceCounter = Number.isFinite(storedCounter) && storedCounter > 0 ? Math.floor(storedCounter) : highestInvoiceSequence(invoices) + 1;
   const workspace: Workspace = {
-    version: 3,
+    version: 4,
     profile: { ...empty.profile, ...(source.profile ?? {}) },
     clients: Array.isArray(source.clients) ? source.clients.map(normalizeClient) : [],
     billingPeriods: Array.isArray(source.billingPeriods) ? source.billingPeriods.map(normalizeBillingPeriod) : [],
     timesheets: Array.isArray(source.timesheets) ? source.timesheets.map(normalizeTimesheet) : [],
-    invoices: Array.isArray(source.invoices) ? source.invoices.map(normalizeInvoice) : [],
+    invoices,
     activity: Array.isArray(source.activity) ? source.activity.map(normalizeActivity) : [],
     settings: {
       currency: source.settings?.currency ?? 'GBP',
       invoiceTemplate: isInvoiceTemplate(source.settings?.invoiceTemplate) ? source.settings.invoiceTemplate : 'classic',
-      companyLogo: source.settings?.companyLogo ?? ''
+      companyLogo: source.settings?.companyLogo ?? '',
+      invoicePrefix: (source.settings?.invoicePrefix ?? 'INV').toString() || 'INV',
+      nextInvoiceNumber: nextInvoiceCounter,
+      defaultTaxRate: Number(source.settings?.defaultTaxRate) || 0
     }
   };
   return {
@@ -254,6 +277,8 @@ function normalizeClient(client: Partial<Client>): Client {
     defaultPaymentTermsDays: Number(client.defaultPaymentTermsDays || 14),
     defaultInvoiceTemplate: isInvoiceTemplate(client.defaultInvoiceTemplate) ? client.defaultInvoiceTemplate : '',
     defaultServiceDescription: client.defaultServiceDescription || 'Professional services',
+    defaultTaxRate: Number(client.defaultTaxRate) || 0,
+    archived: Boolean(client.archived),
     notes: client.notes || '',
     notesUpdatedAt: client.notesUpdatedAt || ''
   };
@@ -286,10 +311,20 @@ function normalizeTimesheetEntry(entry: Partial<TimesheetEntry>, parentMode: Tim
 }
 
 function normalizeInvoice(invoice: Partial<Invoice>): Invoice {
+  const status = normalizeInvoiceStatus(invoice.status);
   return {
     ...emptyInvoice(),
     ...invoice,
+    status,
     template: invoice.template === 'modern' || invoice.template === 'compact' ? invoice.template : 'classic',
+    poReference: invoice.poReference ?? '',
+    discountPercent: Number(invoice.discountPercent) || 0,
+    taxRate: Number(invoice.taxRate) || 0,
+    amountPaid: Number(invoice.amountPaid) || 0,
+    sentDate: invoice.sentDate ?? '',
+    paidDate: invoice.paidDate ?? (status === 'paid' ? invoice.issueDate ?? '' : ''),
+    timesheetId: invoice.timesheetId ?? '',
+    snapshot: invoice.snapshot ?? null,
     archived: Boolean(invoice.archived),
     lastPdfGeneratedAt: invoice.lastPdfGeneratedAt ?? '',
     items: Array.isArray(invoice.items) ? invoice.items : []
@@ -309,6 +344,10 @@ function normalizeBillingStatus(status: unknown): BillingPeriodStatus {
   return status === 'review' || status === 'invoiced' || status === 'paid' || status === 'archived' ? status : 'active';
 }
 
+function normalizeInvoiceStatus(status: unknown): InvoiceStatus {
+  return status === 'sent' || status === 'paid' || status === 'overdue' || status === 'void' ? status : 'draft';
+}
+
 function normalizeActivity(event: Partial<ActivityEvent>): ActivityEvent {
   return {
     id: event.id || uid('activity'),
@@ -325,7 +364,9 @@ export function ensureBillingPeriods(workspace: Workspace) {
 
   for (const timesheet of workspace.timesheets) {
     const key = periodKey(timesheet.clientId, timesheet.month, timesheet.year);
-    const invoice = findInvoiceForPeriod(workspace.invoices, timesheet.clientId, timesheet.month, timesheet.year);
+    const invoice =
+      workspace.invoices.find((item) => item.timesheetId === timesheet.id) ??
+      findInvoiceForPeriod(workspace.invoices, timesheet.clientId, timesheet.month, timesheet.year);
     const found = periods.find((period) => periodKey(period.clientId, period.month, period.year) === key);
     if (found) {
       found.timesheetId ||= timesheet.id;
@@ -405,37 +446,47 @@ export function duplicateTimesheet(timesheet: Timesheet): Timesheet {
   };
 }
 
-export function duplicateInvoice(invoice: Invoice, invoices: Invoice[], paymentTermsDays = 14): Invoice {
+export function duplicateInvoice(invoice: Invoice, invoiceNumber: string, paymentTermsDays = 14): Invoice {
   const issueDate = todayIso();
   return {
     ...structuredClone(invoice),
     id: uid('invoice'),
-    invoiceNumber: nextInvoiceNumber(invoices),
+    invoiceNumber,
     issueDate,
     dueDate: addDays(issueDate, paymentTermsDays),
     status: 'draft',
+    amountPaid: 0,
+    sentDate: '',
+    paidDate: '',
+    timesheetId: '',
+    poReference: '',
+    snapshot: null,
     archived: false,
     lastPdfGeneratedAt: '',
     items: invoice.items.map((item) => ({ ...item, id: uid('item') }))
   };
 }
 
-export function invoiceFromTimesheet(timesheet: Timesheet, invoiceNumber: string, paymentTermsDays: number, template: string): Invoice {
+export function invoiceFromTimesheet(
+  timesheet: Timesheet,
+  invoiceNumber: string,
+  paymentTermsDays: number,
+  template: string,
+  taxRate = 0
+): Invoice {
   const issueDate = todayIso();
   const hours = billableMinutes(timesheet) / 60;
   return {
-    id: uid('invoice'),
+    ...emptyInvoice(timesheet.clientId, timesheet.currency, template === 'modern' || template === 'compact' ? template : 'classic'),
     invoiceNumber,
-    clientId: timesheet.clientId,
     issueDate,
     dueDate: addDays(issueDate, paymentTermsDays),
-    status: 'draft',
-    currency: timesheet.currency,
-    template: template === 'modern' || template === 'compact' ? template : 'classic',
+    taxRate,
+    timesheetId: timesheet.id,
     items: [
       {
         id: uid('item'),
-        description: `${timesheet.title} - ${monthName(timesheet.month)} ${timesheet.year}`,
+        description: `${timesheet.title} — ${monthName(timesheet.month)} ${timesheet.year}`,
         quantity: Number(hours.toFixed(2)),
         unitPrice: timesheet.hourlyRate
       }
@@ -475,11 +526,7 @@ export function timesheetTotal(timesheet: Timesheet) {
   return (billableMinutes(timesheet) / 60) * Number(timesheet.hourlyRate || 0);
 }
 
-export function invoiceSubtotal(invoice: Invoice) {
-  return invoice.items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unitPrice || 0), 0);
-}
-
-export const invoiceTotal = invoiceSubtotal;
+export { invoiceSubtotal, invoiceTotal, invoiceTotals, lineTotal } from './money';
 
 export function formatMoney(value: number, currency: string) {
   return new Intl.NumberFormat('en-GB', { style: 'currency', currency: currency || 'GBP' }).format(value || 0);
@@ -489,12 +536,88 @@ export function formatHours(minutes: number) {
   return `${(minutes / 60).toFixed(2)}h`;
 }
 
+const STATUS_LABELS: Record<InvoiceStatus, string> = {
+  draft: 'Draft',
+  sent: 'Sent',
+  paid: 'Paid',
+  overdue: 'Overdue',
+  void: 'Void'
+};
+
+export function statusLabel(status: InvoiceStatus) {
+  return STATUS_LABELS[status] ?? 'Draft';
+}
+
 export function clientName(clients: Client[], clientId: string) {
   return clients.find((client) => client.id === clientId)?.name ?? 'No client';
 }
 
-export function nextInvoiceNumber(invoices: Invoice[]) {
-  const year = new Date().getFullYear();
-  const next = invoices.length + 1;
-  return `INV-${year}-${String(next).padStart(3, '0')}`;
+export function formatInvoiceNumber(prefix: string, year: number, seq: number) {
+  const cleanPrefix = (prefix || 'INV').trim().replace(/[-\s]+$/, '');
+  return `${cleanPrefix}-${year}-${String(Math.max(1, seq)).padStart(3, '0')}`;
+}
+
+/**
+ * The next invoice number for a workspace, using a persistent counter so numbers
+ * are never reused after a delete and never collide after a duplicate. Returns
+ * the formatted number and the counter value that should be stored back.
+ */
+export function nextInvoiceNumber(workspace: Workspace) {
+  const seq = Math.max(1, Math.floor(Number(workspace.settings.nextInvoiceNumber) || 1));
+  return {
+    invoiceNumber: formatInvoiceNumber(workspace.settings.invoicePrefix, new Date().getFullYear(), seq),
+    nextCounter: seq + 1
+  };
+}
+
+/** Highest trailing sequence number found across existing invoice numbers. */
+export function highestInvoiceSequence(invoices: Invoice[]) {
+  return invoices.reduce((max, invoice) => {
+    const match = /(\d+)\s*$/.exec(invoice.invoiceNumber || '');
+    const value = match ? Number(match[1]) : 0;
+    return value > max ? value : max;
+  }, 0);
+}
+
+const OPEN_INVOICE_STATUSES: InvoiceStatus[] = ['draft', 'sent', 'overdue'];
+
+/** An invoice is overdue when it is unpaid and past its due date. */
+export function isOverdue(invoice: Invoice, today = todayIso()) {
+  return OPEN_INVOICE_STATUSES.includes(invoice.status) && Boolean(invoice.dueDate) && invoice.dueDate < today;
+}
+
+/** The status to display, upgrading unpaid past-due invoices to `overdue`. */
+export function effectiveStatus(invoice: Invoice, today = todayIso()): InvoiceStatus {
+  if (invoice.status === 'sent' && isOverdue(invoice, today)) return 'overdue';
+  return invoice.status;
+}
+
+export function buildInvoiceSnapshot(workspace: Workspace, invoice: Invoice): InvoiceSnapshot {
+  const client = workspace.clients.find((item) => item.id === invoice.clientId);
+  const p = workspace.profile;
+  return {
+    capturedAt: new Date().toISOString(),
+    business: {
+      companyName: p.companyName,
+      contactName: p.contactName,
+      address: p.address,
+      email: p.email,
+      phone: p.phone,
+      companyNumber: p.companyNumber,
+      vatNumber: p.vatNumber,
+      bankName: p.bankName,
+      accountName: p.accountName,
+      sortCode: p.sortCode,
+      accountNumber: p.accountNumber,
+      iban: p.iban
+    },
+    client: {
+      name: client?.name ?? '',
+      contactName: client?.contactName ?? '',
+      address: client?.address ?? '',
+      email: client?.email ?? '',
+      companyNumber: client?.companyNumber ?? '',
+      vatNumber: client?.vatNumber ?? ''
+    }
+  };
 }
