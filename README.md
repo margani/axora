@@ -15,7 +15,7 @@ The app stores data in the browser with `localStorage` and lets the user import/
 - Invoice create, edit, delete, duplicate, create from timesheet, totals, and PDF export
 - Three invoice PDF templates: Classic, Modern, and Compact
 - Profile, payment, currency, and invoice template settings
-- Sample data on first load for immediate testing
+- Empty first-run workspace in production, with optional local demo data
 
 ## Tech
 
@@ -38,6 +38,12 @@ Run the development server:
 
 ```sh
 npm run dev
+```
+
+To seed demo data in an empty local browser for development testing, run with:
+
+```sh
+VITE_ENABLE_DEMO_DATA=true npm run dev
 ```
 
 Open:

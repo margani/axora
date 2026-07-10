@@ -9,6 +9,7 @@
     FileText,
     History,
     LayoutDashboard,
+    MoreHorizontal,
     Plus,
     ReceiptText,
     Search,
@@ -16,8 +17,18 @@
     Trash2,
     Upload
   } from '@lucide/svelte';
-  import type { ActivityEvent, BillingPeriod, Client, Invoice, TimesheetEntry, Workspace } from '$lib/types';
+  import type { ActivityEvent, BillingPeriod, Client, Invoice, InvoiceItem, TimesheetEntry, Workspace } from '$lib/types';
   import { generateInvoicePdf, generateTimesheetPdf } from '$lib/pdf';
+  import {
+    dirtySaveState,
+    errorSaveState,
+    initialSaveState,
+    savedSaveState,
+    saveStatusBadge,
+    saveStatusText,
+    savingSaveState,
+    type SaveState
+  } from '$lib/saveStatus';
   import {
     activity,
     addDays,
@@ -30,12 +41,14 @@
     duplicateInvoice,
     emptyBillingPeriod,
     emptyClient,
+    emptyWorkspace,
     emptyInvoice,
     emptyInvoiceItem,
     emptyTimesheet,
     emptyTimesheetEntry,
     formatHours,
     formatMoney,
+    hasSavedWorkspace,
     invoiceFromTimesheet,
     invoiceTotal,
     loadWorkspace,
@@ -43,7 +56,6 @@
     nextInvoiceNumber,
     nextMonth,
     normalizeWorkspace,
-    sampleWorkspace,
     saveWorkspace,
     syncEntryDurationFromTime,
     entryMinutes,
@@ -54,14 +66,14 @@
   type View = 'dashboard' | 'clients' | 'settings' | 'timesheetDetail' | 'invoiceDetail';
   type ClientTab = 'overview' | 'timesheets' | 'invoices' | 'notes' | 'settings';
   type SortOrder = 'newest' | 'oldest';
+  type DetailMenu = '' | 'timesheet' | 'invoice';
 
-  let workspace: Workspace = sampleWorkspace();
+  let workspace: Workspace = emptyWorkspace();
   let activeView: View = 'dashboard';
   let selectedClientId = '';
   let selectedPeriodId = '';
   let selectedInvoiceId = '';
-  let lastSaved = '';
-  let saveStatus: 'saved' | 'saving' | 'unsaved' = 'saved';
+  let saveState: SaveState = { status: 'idle', lastSavedAt: null };
   let ready = false;
   let message = '';
   let searchQuery = '';
@@ -73,8 +85,18 @@
   let timesheetSort: SortOrder = 'newest';
   let invoiceSort: SortOrder = 'newest';
   let activityOpen = false;
-  let clearConfirmText = '';
+  let openDetailMenu: DetailMenu = '';
+  let clearConfirmOpen = false;
+  let editingEntryId = '';
+  let entryDraft: TimesheetEntry | undefined;
+  let entryDraftOriginal: TimesheetEntry | undefined;
+  let entryDraftIsNew = false;
+  let editingInvoiceItemId = '';
+  let invoiceItemDraft: InvoiceItem | undefined;
+  let invoiceItemDraftOriginal: InvoiceItem | undefined;
+  let invoiceItemDraftIsNew = false;
   let saveTimer: ReturnType<typeof setTimeout>;
+  let toastTimer: ReturnType<typeof setTimeout>;
   let fileInput: HTMLInputElement;
   let logoInput: HTMLInputElement;
 
@@ -103,6 +125,10 @@
   $: filteredClientPeriods = selectedClient ? filteredPeriods(selectedClient.id) : [];
   $: filteredClientInvoices = selectedClient ? filteredInvoices(selectedClient.id) : [];
   $: searchResults = buildSearchResults(searchQuery);
+  $: selectedEntryExists = Boolean(editingEntryId && selectedTimesheet?.entries.some((entry) => entry.id === editingEntryId));
+  $: if (editingEntryId && !selectedEntryExists && !entryDraftIsNew) closeEntryEditor(false);
+  $: selectedInvoiceItemExists = Boolean(editingInvoiceItemId && selectedInvoice?.items.some((item) => item.id === editingInvoiceItemId));
+  $: if (editingInvoiceItemId && !selectedInvoiceItemExists && !invoiceItemDraftIsNew) closeInvoiceItemEditor(false);
 
   const viewPaths: Record<'dashboard' | 'clients' | 'settings', string> = {
     dashboard: '/',
@@ -137,31 +163,80 @@
   }
 
   onMount(() => {
+    void initializeWorkspace();
+    const onPopState = () => {
+      activeView = viewFromPath(window.location.pathname);
+      openDetailMenu = '';
+      closeEntryEditor(false);
+      clearToast();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') openDetailMenu = '';
+      if (event.key === 'Escape') clearConfirmOpen = false;
+      if (event.key === 'Escape' && entryDraft) closeEntryEditor();
+    };
+    const onDocumentClick = (event: MouseEvent) => {
+      if (event.target instanceof Element && event.target.closest('[data-detail-more]')) return;
+      openDetailMenu = '';
+    };
+    window.addEventListener('popstate', onPopState);
+    window.addEventListener('keydown', onKeyDown);
+    document.addEventListener('click', onDocumentClick);
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+      window.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('click', onDocumentClick);
+      clearTimeout(toastTimer);
+    };
+  });
+
+  async function initializeWorkspace() {
+    const hasSavedData = hasSavedWorkspace();
     const loaded = loadWorkspace();
     workspace = loaded.workspace;
-    lastSaved = loaded.savedAt;
+
+    if (!hasSavedData && import.meta.env.DEV && import.meta.env.VITE_ENABLE_DEMO_DATA === 'true') {
+      const { demoWorkspace } = await import('$lib/demoWorkspace');
+      workspace = demoWorkspace();
+    }
+
+    saveState = hasSavedData ? initialSaveState(loaded.savedAt) : initialSaveState();
     selectedClientId = workspace.clients[0]?.id ?? '';
     selectedPeriodId = clientPeriods(selectedClientId)[0]?.id ?? '';
     activeView = viewFromPath(window.location.pathname);
     ready = true;
-    const onPopState = () => {
-      activeView = viewFromPath(window.location.pathname);
-      message = '';
-    };
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
-  });
+  }
 
   function touch(note = 'Saved locally') {
     if (!ready) return;
-    saveStatus = 'unsaved';
+    saveState = dirtySaveState(saveState);
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      saveStatus = 'saving';
-      lastSaved = saveWorkspace(workspace);
-      saveStatus = 'saved';
-      message = note;
+      saveState = savingSaveState(saveState);
+      try {
+        persistWorkspace();
+      } catch (error) {
+        saveState = errorSaveState(saveState);
+        showToast(error instanceof Error ? error.message : 'Could not save workspace.');
+      }
     }, 250);
+  }
+
+  function persistWorkspace() {
+    saveState = savedSaveState(saveWorkspace(workspace));
+  }
+
+  function showToast(note: string) {
+    message = note;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      message = '';
+    }, 3200);
+  }
+
+  function clearToast() {
+    clearTimeout(toastTimer);
+    message = '';
   }
 
   function replaceWorkspace(next: Workspace, note = 'Saved locally') {
@@ -175,7 +250,7 @@
 
   function switchView(view: View, push = true) {
     activeView = view;
-    message = '';
+    clearToast();
     const path = view === 'timesheetDetail' || view === 'invoiceDetail' ? window.location.pathname : viewPaths[view];
     if (push && window.location.pathname !== path) history.pushState({}, '', path);
   }
@@ -189,7 +264,7 @@
     const client = workspace.clients.find((item) => item.id === clientId);
     const path = client ? `/clients/${slugify(client.name || client.id)}` : '/clients';
     if (window.location.pathname !== path) history.pushState({}, '', path);
-    message = '';
+    clearToast();
   }
 
   function slugify(value: string) {
@@ -344,20 +419,41 @@
     selectedClientId = period.clientId;
     selectedPeriodId = period.id;
     selectedInvoiceId = '';
+    clientTab = 'timesheets';
     activeView = 'timesheetDetail';
     const path = timesheetPath(period);
     if (window.location.pathname !== path) history.pushState({}, '', path);
-    message = `Opened ${periodTitle(period)} Timesheet`;
+    clearToast();
   }
 
   function openInvoice(invoice: Invoice) {
     selectedClientId = invoice.clientId;
     selectedInvoiceId = invoice.id;
     selectedPeriodId = workspace.billingPeriods.find((period) => period.invoiceId === invoice.id)?.id ?? selectedPeriodId;
+    clientTab = 'invoices';
     activeView = 'invoiceDetail';
     const path = invoicePath(invoice);
     if (window.location.pathname !== path) history.pushState({}, '', path);
-    message = `Opened Invoice ${invoice.invoiceNumber}`;
+    clearToast();
+  }
+
+  function backToClientTab(client: Client, tab: ClientTab) {
+    selectedClientId = client.id;
+    selectedInvoiceId = '';
+    clientTab = tab;
+    activeView = 'clients';
+    openDetailMenu = '';
+    const path = clientPath(client);
+    if (window.location.pathname !== path) history.pushState({}, '', path);
+    clearToast();
+  }
+
+  function toggleDetailMenu(menu: DetailMenu) {
+    openDetailMenu = openDetailMenu === menu ? '' : menu;
+  }
+
+  function closeDetailMenu() {
+    openDetailMenu = '';
   }
 
   function createInvoiceForClient(client: Client) {
@@ -381,6 +477,7 @@
     period.status = invoice.status === 'paid' ? 'paid' : 'invoiced';
     addActivity(activity(`Created Invoice ${invoice.invoiceNumber}`, 'invoice', period.id));
     touch('Invoice generated');
+    showToast('Invoice generated');
   }
 
   function createStandaloneInvoice(client: Client) {
@@ -402,6 +499,7 @@
     workspace.invoices = [copy, ...workspace.invoices];
     addActivity(activity(`Duplicated Invoice ${invoice.invoiceNumber}`, 'invoice'));
     touch('Invoice duplicated');
+    showToast('Invoice duplicated');
   }
 
   function generatePeriodPdf(period: BillingPeriod) {
@@ -418,6 +516,7 @@
     }
     addActivity(activity(`Generated PDF for ${clientName(workspace.clients, period.clientId)} ${periodTitle(period)}`, 'pdf', period.id));
     touch('PDF generated');
+    showToast('PDF generated');
   }
 
   function generateInvoicePdfOnly(invoice: Invoice) {
@@ -425,6 +524,7 @@
     invoice.lastPdfGeneratedAt = new Date().toISOString();
     addActivity(activity(`Generated PDF for ${invoice.invoiceNumber}`, 'pdf'));
     touch('Invoice PDF generated');
+    showToast('Invoice PDF generated');
   }
 
   function markInvoicePaid(invoice: Invoice) {
@@ -433,6 +533,7 @@
     if (period) period.status = 'paid';
     addActivity(activity(`Marked Invoice ${invoice.invoiceNumber} paid`, 'payment', period?.id));
     touch('Invoice marked paid');
+    showToast('Invoice marked paid');
   }
 
   function archiveInvoiceForClient(invoice: Invoice, archived = true) {
@@ -441,6 +542,7 @@
     if (period) period.archived = archived;
     addActivity(activity(`${archived ? 'Archived' : 'Restored'} Invoice ${invoice.invoiceNumber}`, 'archive', period?.id));
     touch(archived ? 'Invoice archived' : 'Invoice restored');
+    showToast(archived ? 'Invoice archived' : 'Invoice restored');
   }
 
   function archivePeriod(period: BillingPeriod, archived = true) {
@@ -449,27 +551,186 @@
     if (timesheet) timesheet.archived = archived;
     addActivity(activity(`${archived ? 'Archived' : 'Restored'} ${clientName(workspace.clients, period.clientId)} ${periodTitle(period)}`, 'archive', period.id));
     touch(archived ? 'Timesheet archived' : 'Timesheet restored');
+    showToast(archived ? 'Timesheet archived' : 'Timesheet restored');
   }
 
   function addEntry(period: BillingPeriod) {
     const timesheet = periodTimesheet(period);
     if (!timesheet) return;
     const entry = emptyTimesheetEntry();
+    entry.date = `${period.year}-${String(period.month).padStart(2, '0')}-01`;
     entry.description = workspace.clients.find((client) => client.id === period.clientId)?.defaultServiceDescription || `${monthName(period.month)} work`;
-    timesheet.entries = [...timesheet.entries, entry];
-    addActivity(activity(`Added hours to ${clientName(workspace.clients, period.clientId)} ${periodTitle(period)}`, 'updated', period.id));
-    touch('Hours added');
+    openEntryEditor(entry, true);
   }
 
-  function removeEntry(period: BillingPeriod, entryId: string) {
+  function cloneEntry(entry: TimesheetEntry): TimesheetEntry {
+    return { ...entry };
+  }
+
+  function replaceTimesheetEntries(timesheetId: string, entries: TimesheetEntry[]) {
+    workspace = {
+      ...workspace,
+      timesheets: workspace.timesheets.map((timesheet) =>
+        timesheet.id === timesheetId ? { ...timesheet, entries: entries.map(cloneEntry) } : timesheet
+      )
+    };
+  }
+
+  function entryDraftChanged() {
+    return Boolean(entryDraft && JSON.stringify(entryDraft) !== JSON.stringify(entryDraftOriginal));
+  }
+
+  function openEntryEditor(entry: TimesheetEntry, isNew = false) {
+    if (entryDraftChanged() && !confirm('Discard unsaved entry changes?')) return;
+    entryDraft = cloneEntry(entry);
+    entryDraftOriginal = cloneEntry(entry);
+    entryDraftIsNew = isNew;
+    editingEntryId = isNew ? '' : entry.id;
+  }
+
+  function closeEntryEditor(confirmUnsaved = true) {
+    if (confirmUnsaved && entryDraftChanged() && !confirm('Discard unsaved entry changes?')) return;
+    entryDraft = undefined;
+    entryDraftOriginal = undefined;
+    entryDraftIsNew = false;
+    editingEntryId = '';
+  }
+
+  function saveEntryDraft(period: BillingPeriod) {
+    const timesheet = periodTimesheet(period);
+    if (!timesheet || !entryDraft) return;
+    const error = timeEntryError(entryDraft);
+    if (error) {
+      showToast(error);
+      return;
+    }
+    const wasNew = entryDraftIsNew;
+    const nextEntry = cloneEntry(entryDraft);
+    const nextEntries = wasNew
+      ? [...timesheet.entries, nextEntry]
+      : timesheet.entries.map((entry) => (entry.id === nextEntry.id ? nextEntry : entry));
+    if (wasNew) {
+      addActivity(activity(`Added hours to ${clientName(workspace.clients, period.clientId)} ${periodTitle(period)}`, 'updated', period.id));
+    }
+    replaceTimesheetEntries(timesheet.id, nextEntries);
+    editingEntryId = entryDraft.id;
+    entryDraftOriginal = cloneEntry(entryDraft);
+    entryDraftIsNew = false;
+    touch('Timesheet saved');
+    showToast(wasNew ? 'Entry added' : 'Entry saved');
+    closeEntryEditor(false);
+  }
+
+  function removeEntry(period: BillingPeriod, entryId: string, confirmDelete = true) {
     const timesheet = periodTimesheet(period);
     if (!timesheet) return;
-    timesheet.entries = timesheet.entries.filter((entry) => entry.id !== entryId);
+    if (confirmDelete && !confirm('Delete this entry?')) return;
+    replaceTimesheetEntries(timesheet.id, timesheet.entries.filter((entry) => entry.id !== entryId));
+    if (editingEntryId === entryId || entryDraft?.id === entryId) closeEntryEditor(false);
     touch('Entry removed');
+    showToast('Entry removed');
   }
 
-  function eventChecked(event: Event) {
-    return (event.currentTarget as HTMLInputElement).checked;
+  function cloneInvoiceItem(item: InvoiceItem): InvoiceItem {
+    return { ...item };
+  }
+
+  function invoiceItemAmount(item: InvoiceItem, invoice = selectedInvoice) {
+    return formatMoney(Number(item.quantity || 0) * Number(item.unitPrice || 0), invoice?.currency || workspace.settings.currency);
+  }
+
+  function replaceInvoiceItems(invoiceId: string, items: InvoiceItem[]) {
+    workspace = {
+      ...workspace,
+      invoices: workspace.invoices.map((invoice) =>
+        invoice.id === invoiceId ? { ...invoice, items: items.map(cloneInvoiceItem) } : invoice
+      )
+    };
+  }
+
+  function invoiceItemDraftChanged() {
+    return Boolean(invoiceItemDraft && JSON.stringify(invoiceItemDraft) !== JSON.stringify(invoiceItemDraftOriginal));
+  }
+
+  function openInvoiceItemEditor(item: InvoiceItem, isNew = false) {
+    if (invoiceItemDraftChanged() && !confirm('Discard unsaved invoice item changes?')) return;
+    invoiceItemDraft = cloneInvoiceItem(item);
+    invoiceItemDraftOriginal = cloneInvoiceItem(item);
+    invoiceItemDraftIsNew = isNew;
+    editingInvoiceItemId = isNew ? '' : item.id;
+  }
+
+  function closeInvoiceItemEditor(confirmUnsaved = true) {
+    if (confirmUnsaved && invoiceItemDraftChanged() && !confirm('Discard unsaved invoice item changes?')) return;
+    invoiceItemDraft = undefined;
+    invoiceItemDraftOriginal = undefined;
+    invoiceItemDraftIsNew = false;
+    editingInvoiceItemId = '';
+  }
+
+  function addInvoiceItem(invoice: Invoice) {
+    const item = emptyInvoiceItem();
+    item.description = workspace.clients.find((client) => client.id === invoice.clientId)?.defaultServiceDescription || 'Professional services';
+    item.unitPrice = Number(invoice.items[0]?.unitPrice || 0);
+    openInvoiceItemEditor(item, true);
+  }
+
+  function saveInvoiceItemDraft(invoice: Invoice) {
+    if (!invoiceItemDraft) return;
+    const wasNew = invoiceItemDraftIsNew;
+    const nextItem = cloneInvoiceItem(invoiceItemDraft);
+    const nextItems = wasNew
+      ? [...invoice.items, nextItem]
+      : invoice.items.map((item) => (item.id === nextItem.id ? nextItem : item));
+    replaceInvoiceItems(invoice.id, nextItems);
+    editingInvoiceItemId = nextItem.id;
+    invoiceItemDraft = cloneInvoiceItem(nextItem);
+    invoiceItemDraftOriginal = cloneInvoiceItem(nextItem);
+    invoiceItemDraftIsNew = false;
+    touch('Invoice saved');
+    showToast(wasNew ? 'Invoice item added' : 'Invoice item saved');
+    closeInvoiceItemEditor(false);
+  }
+
+  function removeInvoiceItem(invoice: Invoice, itemId: string, confirmDelete = true) {
+    if (confirmDelete && !confirm('Delete this invoice item?')) return;
+    replaceInvoiceItems(invoice.id, invoice.items.filter((item) => item.id !== itemId));
+    if (editingInvoiceItemId === itemId || invoiceItemDraft?.id === itemId) closeInvoiceItemEditor(false);
+    touch('Item removed');
+    showToast('Item removed');
+  }
+
+  function deleteTimesheetPeriod(period: BillingPeriod) {
+    const client = workspace.clients.find((item) => item.id === period.clientId);
+    const timesheet = periodTimesheet(period);
+    if (!client || !timesheet) return;
+    if (!confirm(`Delete ${periodTitle(period)} timesheet?`)) return;
+    workspace = {
+      ...workspace,
+      timesheets: workspace.timesheets.filter((item) => item.id !== timesheet.id),
+      billingPeriods: workspace.billingPeriods.filter((item) => item.id !== period.id)
+    };
+    addActivity(activity(`Deleted ${periodTitle(period)} timesheet for ${client.name || 'client'}`, 'updated'));
+    backToClientTab(client, 'timesheets');
+    touch('Timesheet deleted');
+    showToast('Timesheet deleted');
+  }
+
+  function deleteInvoiceForClient(invoice: Invoice) {
+    const client = workspace.clients.find((item) => item.id === invoice.clientId);
+    if (!client) return;
+    if (!confirm(`Delete Invoice ${invoice.invoiceNumber}?`)) return;
+    workspace = {
+      ...workspace,
+      invoices: workspace.invoices.filter((item) => item.id !== invoice.id),
+      billingPeriods: workspace.billingPeriods
+        .map((period) => (period.invoiceId === invoice.id ? { ...period, invoiceId: '' } : period))
+        .filter((period) => period.timesheetId || period.invoiceId)
+    };
+    addActivity(activity(`Deleted Invoice ${invoice.invoiceNumber}`, 'updated'));
+    backToClientTab(client, 'invoices');
+    touch('Invoice deleted');
+    showToast('Invoice deleted');
   }
 
   function eventValue(event: Event) {
@@ -480,41 +741,25 @@
     return Number((event.currentTarget as HTMLInputElement).value || 0);
   }
 
-  function commitEntryChange(entry: TimesheetEntry) {
-    const timesheet = selectedTimesheet;
-    if (!timesheet) {
-      workspace = { ...workspace };
-      return;
-    }
-    const nextTimesheet = {
-      ...timesheet,
-      entries: timesheet.entries.map((item) => (item.id === entry.id ? { ...entry } : item))
-    };
-    workspace = {
-      ...workspace,
-      timesheets: workspace.timesheets.map((item) => (item.id === nextTimesheet.id ? nextTimesheet : item))
-    };
+  function setDraftTimeMode(useTime: boolean) {
+    if (!entryDraft) return;
+    entryDraft.timeTrackingMode = useTime ? 'time' : 'duration';
+    if (useTime && !timeEntryError(entryDraft)) syncEntryDurationFromTime(entryDraft);
+    entryDraft = cloneEntry(entryDraft);
   }
 
-  function setEntryTimeMode(entry: TimesheetEntry, useTime: boolean) {
-    entry.timeTrackingMode = useTime ? 'time' : 'duration';
-    if (useTime && !timeEntryError(entry)) syncEntryDurationFromTime(entry);
-    commitEntryChange(entry);
-    touch('Timesheet saved');
+  function updateDraftHours(hours: number) {
+    if (!entryDraft) return;
+    entryDraft.hours = hours;
+    entryDraft = cloneEntry(entryDraft);
   }
 
-  function updateEntryHours(entry: TimesheetEntry, hours: number) {
-    entry.hours = hours;
-    commitEntryChange(entry);
-    touch('Timesheet saved');
-  }
-
-  function updateEntryTiming(entry: TimesheetEntry, field: 'startTime' | 'endTime' | 'breakMinutes', value: string | number) {
-    if (field === 'breakMinutes') entry.breakMinutes = Number(value || 0);
-    else entry[field] = String(value);
-    if (!timeEntryError(entry)) syncEntryDurationFromTime(entry);
-    commitEntryChange(entry);
-    touch('Timesheet saved');
+  function updateDraftTiming(field: 'startTime' | 'endTime' | 'breakMinutes', value: string | number) {
+    if (!entryDraft) return;
+    if (field === 'breakMinutes') entryDraft.breakMinutes = Number(value || 0);
+    else entryDraft[field] = String(value);
+    if (!timeEntryError(entryDraft)) syncEntryDurationFromTime(entryDraft);
+    entryDraft = cloneEntry(entryDraft);
   }
 
   function timeValue(value: string) {
@@ -541,6 +786,24 @@
   function entryDurationSummary(entry: TimesheetEntry) {
     const duration = formatHours(entryMinutes(entry));
     return entry.timeTrackingMode === 'time' && entry.startTime && entry.endTime ? `${entry.startTime}–${entry.endTime} · ${duration}` : duration;
+  }
+
+  function entryModeLabel(entry: TimesheetEntry) {
+    return entry.timeTrackingMode === 'time' ? 'Time' : 'Hours';
+  }
+
+  function entryAmount(entry: TimesheetEntry) {
+    return selectedTimesheet && entry.billable ? formatMoney((entryMinutes(entry) / 60) * selectedTimesheet.hourlyRate, selectedTimesheet.currency) : '—';
+  }
+
+  function entryDateLabel(date: string) {
+    const value = new Date(`${date}T12:00:00`);
+    return Number.isNaN(value.getTime()) ? date : value.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+
+  function entryDayLabel(date: string) {
+    const value = new Date(`${date}T12:00:00`);
+    return Number.isNaN(value.getTime()) ? '' : value.toLocaleDateString('en-GB', { weekday: 'short' });
   }
 
   function updateClientNotes(client: Client) {
@@ -573,7 +836,7 @@
       addActivity(activity('Imported Workspace', 'import'));
       touch('Workspace imported');
     } catch (error) {
-      message = error instanceof Error ? error.message : 'Could not import workspace.';
+      showToast(error instanceof Error ? error.message : 'Could not import workspace.');
     } finally {
       input.value = '';
     }
@@ -581,9 +844,9 @@
 
   function exportWorkspace() {
     addActivity(activity('Exported Workspace', 'export'));
-    lastSaved = saveWorkspace(workspace);
+    persistWorkspace();
     downloadJson(workspace);
-    message = 'Workspace exported';
+    showToast('Workspace exported');
   }
 
   async function uploadLogo(event: Event) {
@@ -605,28 +868,13 @@
   }
 
   function clearLocal() {
-    if (clearConfirmText !== 'DELETE') {
-      message = 'Type DELETE before clearing local data.';
-      return;
-    }
     clearWorkspace();
-    workspace = sampleWorkspace();
+    workspace = emptyWorkspace();
     selectedClientId = workspace.clients[0]?.id ?? '';
     selectedPeriodId = clientPeriods(selectedClientId)[0]?.id ?? '';
-    lastSaved = '';
-    clearConfirmText = '';
-    message = 'Local data cleared. Sample data is loaded but not saved.';
-  }
-
-  function savedLabel() {
-    if (!lastSaved) return 'Not saved yet';
-    return new Date(lastSaved).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
-  }
-
-  function saveStatusLabel() {
-    if (saveStatus === 'saving') return 'Saving...';
-    if (saveStatus === 'unsaved') return 'Unsaved changes';
-    return 'Saved';
+    saveState = initialSaveState();
+    clearConfirmOpen = false;
+    showToast('Local data cleared.');
   }
 
   function formatDateTime(value: string) {
@@ -746,7 +994,12 @@
                   ? 'Dashboard'
                   : 'Settings'}
         </h1>
-        <p>Last saved: {savedLabel()} <span class="save-status {saveStatus}">{saveStatusLabel()}</span></p>
+        <p>
+          {saveStatusText(saveState)}
+          {#if saveStatusBadge(saveState)}
+            <span class="save-status {saveState.status}">{saveStatusBadge(saveState)}</span>
+          {/if}
+        </p>
       </div>
       <div class="top-actions">
         <div class="search-box">
@@ -767,13 +1020,28 @@
         <input bind:this={fileInput} class="file-input" type="file" accept="application/json,.json" onchange={importWorkspace} />
         <button class="secondary" onclick={() => fileInput.click()}><Upload size={17} /><span>Import</span></button>
         <button class="secondary" onclick={exportWorkspace}><Download size={17} /><span>Export</span></button>
-        <input class="clear-input" bind:value={clearConfirmText} placeholder="Type DELETE" aria-label="Type DELETE to clear data" />
-        <button class="danger" onclick={clearLocal}><Trash2 size={17} /><span>Clear</span></button>
+        <button class="danger" onclick={() => (clearConfirmOpen = true)}><Trash2 size={17} /><span>Clear</span></button>
       </div>
     </header>
 
     {#if message}
-      <div class="notice">{message}</div>
+      <div class="toast" role="status">
+        <span>{message}</span>
+        <button class="toast-close" aria-label="Dismiss notification" onclick={clearToast}>×</button>
+      </div>
+    {/if}
+
+    {#if clearConfirmOpen}
+      <div class="modal-backdrop">
+        <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="clear-title">
+          <h2 id="clear-title">Clear all data?</h2>
+          <p>This will remove the current workspace data from this browser. This action cannot be undone.</p>
+          <div class="actions end">
+            <button class="secondary" onclick={() => (clearConfirmOpen = false)}>Cancel</button>
+            <button class="danger" onclick={clearLocal}><Trash2 size={16} /> Clear data</button>
+          </div>
+        </div>
+      </div>
     {/if}
 
     {#if activeView === 'dashboard'}
@@ -784,21 +1052,31 @@
         <div class="metric"><span>Hours this month</span><strong>{formatHours(hoursThisMonth)}</strong></div>
         <div class="metric"><span>Hours this year</span><strong>{formatHours(hoursThisYear)}</strong></div>
       </section>
-      <section class="period-grid">
-        {#each workspace.clients as client}
-          <article class="period-card client-overview">
-            <div>
-              <h3>{client.name || 'Untitled client'}</h3>
-              <small>{client.email || client.contactName || 'No contact details'}</small>
-            </div>
-            <div class="period-metrics">
-              <span>Outstanding: <b>{formatMoney(clientOutstanding(client.id), client.defaultCurrency)}</b></span>
-              <span>Hours this month: <b>{formatHours(clientHoursThisMonth(client.id))}</b></span>
-            </div>
-            <button onclick={() => openClient(client.id)}>Open Client</button>
-          </article>
-        {/each}
-      </section>
+      {#if workspace.clients.length}
+        <section class="period-grid">
+          {#each workspace.clients as client}
+            <article class="period-card client-overview">
+              <div>
+                <h3>{client.name || 'Untitled client'}</h3>
+                <small>{client.email || client.contactName || 'No contact details'}</small>
+              </div>
+              <div class="period-metrics">
+                <span>Outstanding: <b>{formatMoney(clientOutstanding(client.id), client.defaultCurrency)}</b></span>
+                <span>Hours this month: <b>{formatHours(clientHoursThisMonth(client.id))}</b></span>
+              </div>
+              <button onclick={() => openClient(client.id)}>Open Client</button>
+            </article>
+          {/each}
+        </section>
+      {:else}
+        <section class="empty-state dashboard-empty">
+          <div>
+            <h2>No clients yet</h2>
+            <p>Create your first client to start tracking timesheets and invoices.</p>
+            <button onclick={addClient}><Plus size={16} /> New Client</button>
+          </div>
+        </section>
+      {/if}
       <section class="list-panel">
         <div class="section-title"><h2>Recent Activity</h2><History size={18} /></div>
         <div class="activity-list">
@@ -1024,63 +1302,147 @@
       {/if}
     {:else if activeView === 'timesheetDetail'}
       {#if selectedClient && selectedPeriod && selectedTimesheet}
-        <section class="detail-page">
-          <nav class="breadcrumb" aria-label="Breadcrumb">
-            <button onclick={() => openClient(selectedClient.id)}>{selectedClient.name || 'Client'}</button>
-            <span>&gt;</span>
-            <button onclick={() => { openClient(selectedClient.id); clientTab = 'timesheets'; }}>Timesheets</button>
-            <span>&gt;</span>
-            <strong>{periodTitle(selectedPeriod)}</strong>
-          </nav>
-          <div class="detail-header">
+        <section class="client-workspace">
+          <div class="client-summary">
             <div>
-              <h2>{periodTitle(selectedPeriod)}</h2>
-              <div class="record-meta">
-                <span>{formatHours(periodHours(selectedPeriod))}</span>
-                <span>{formatMoney(periodValue(selectedPeriod), periodCurrency(selectedPeriod))}</span>
-                <span>{selectedTimesheet.currency} · {formatMoney(selectedTimesheet.hourlyRate, selectedTimesheet.currency)}/h</span>
-              </div>
+              <h2>{selectedClient.name || 'Untitled client'}</h2>
+              <p>{selectedClient.email || selectedClient.contactName || 'Client workspace'}</p>
             </div>
-            <div class="actions">
-              <button class="secondary" onclick={() => generatePeriodPdf(selectedPeriod)}><Download size={16} /> PDF</button>
-              <button onclick={() => generateInvoiceForPeriod(selectedPeriod)}><ReceiptText size={16} /> Generate Invoice</button>
-              <button class="secondary" onclick={() => duplicateTimesheetPeriod(selectedPeriod)}><Copy size={16} /> Duplicate</button>
-              <button class="secondary" onclick={() => archivePeriod(selectedPeriod)}><Archive size={16} /> Archive</button>
+            <div class="summary-metrics">
+              <div><span>Outstanding</span><strong>{formatMoney(clientOutstanding(selectedClient.id), selectedClient.defaultCurrency)}</strong></div>
+              <div><span>Revenue YTD</span><strong>{formatMoney(clientRevenueYtd(selectedClient.id), selectedClient.defaultCurrency)}</strong></div>
+              <div><span>Hours YTD</span><strong>{formatHours(clientHoursYtd(selectedClient.id))}</strong></div>
             </div>
           </div>
-          <section class="detail-editor">
+
+          <div class="client-tabs" role="tablist" aria-label="Client sections">
+            <button onclick={() => backToClientTab(selectedClient, 'overview')}>Overview</button>
+            <button class="active" onclick={() => backToClientTab(selectedClient, 'timesheets')}>Timesheets</button>
+            <button onclick={() => backToClientTab(selectedClient, 'invoices')}>Invoices</button>
+            <button onclick={() => backToClientTab(selectedClient, 'notes')}>Notes</button>
+            <button onclick={() => backToClientTab(selectedClient, 'settings')}>Settings</button>
+          </div>
+
+          <section class="tab-panel workspace-detail">
+            <div class="detail-card">
+              <div>
+                <button class="context-link" onclick={() => backToClientTab(selectedClient, 'timesheets')}>← Back</button>
+                <small>{periodInvoice(selectedPeriod)?.status ?? 'No invoice'}{selectedPeriod.archived ? ' · Archived' : ''}</small>
+                <h2>{periodTitle(selectedPeriod)}</h2>
+                <div class="record-meta">
+                  <span>{formatHours(periodHours(selectedPeriod))}</span>
+                  <span>{formatMoney(periodValue(selectedPeriod), periodCurrency(selectedPeriod))}</span>
+                  <span>{selectedTimesheet.currency} · {formatMoney(selectedTimesheet.hourlyRate, selectedTimesheet.currency)}/h</span>
+                </div>
+              </div>
+              <div class="actions">
+                <button class="secondary" onclick={() => generatePeriodPdf(selectedPeriod)}><Download size={16} /> PDF</button>
+                <button onclick={() => generateInvoiceForPeriod(selectedPeriod)}><ReceiptText size={16} /> Generate Invoice</button>
+                <div class="more-menu-wrap" data-detail-more>
+                  <button class="secondary more-button" aria-haspopup="menu" aria-expanded={openDetailMenu === 'timesheet'} aria-label="More timesheet actions" onclick={() => toggleDetailMenu('timesheet')}>
+                    <MoreHorizontal size={16} /> More
+                  </button>
+                  {#if openDetailMenu === 'timesheet'}
+                    <div class="more-menu" role="menu">
+                      <button role="menuitem" onclick={() => { duplicateTimesheetPeriod(selectedPeriod); closeDetailMenu(); }}><Copy size={16} /> Duplicate</button>
+                      <button role="menuitem" onclick={() => { archivePeriod(selectedPeriod); closeDetailMenu(); }}><Archive size={16} /> Archive</button>
+                      <button class="danger-menu-item" role="menuitem" onclick={() => { deleteTimesheetPeriod(selectedPeriod); closeDetailMenu(); }}><Trash2 size={16} /> Delete</button>
+                    </div>
+                  {/if}
+                </div>
+              </div>
+            </div>
             <div class="section-title">
               <h2>Entries</h2>
-              <button onclick={() => addEntry(selectedPeriod)}><Plus size={16} /> Add Hours</button>
+              <button onclick={() => addEntry(selectedPeriod)}><Plus size={16} /> Add Entry</button>
             </div>
-            <div class="entry-list" oninput={() => touch('Timesheet saved')}>
-              {#each selectedTimesheet.entries as entry}
-                <div class:time-entry={entry.timeTrackingMode === 'time'} class="entry-grid">
-                  <label>Date <input type="date" bind:value={entry.date} /></label>
-                  {#if entry.timeTrackingMode === 'time'}
-                    <label>Start <input type="time" value={entry.startTime} oninput={(event) => updateEntryTiming(entry, 'startTime', eventValue(event))} /></label>
-                    <label>End <input type="time" value={entry.endTime} oninput={(event) => updateEntryTiming(entry, 'endTime', eventValue(event))} /></label>
-                    <label>Break <input type="number" min="0" step="5" value={entry.breakMinutes} oninput={(event) => updateEntryTiming(entry, 'breakMinutes', eventNumber(event))} /></label>
-                    <div class:error={Boolean(timeEntryError(entry))} class="calculated-duration">
-                      <span>Duration</span>
-                      <strong>{calculatedEntryDuration(entry)}</strong>
-                      {#if timeEntryError(entry)}
-                        <small>{timeEntryError(entry)}</small>
-                      {/if}
-                    </div>
-                  {:else}
-                    <label>Hours <input type="number" min="0" step="0.25" value={entry.hours} oninput={(event) => updateEntryHours(entry, eventNumber(event))} /></label>
-                  {/if}
-                  <label class="check"><input type="checkbox" bind:checked={entry.billable} onchange={() => touch('Timesheet saved')} /> Billable</label>
-                  <label class="description">Description <input bind:value={entry.description} /></label>
-                  <label class="check time-toggle">
-                    <input type="checkbox" checked={entry.timeTrackingMode === 'time'} onchange={(event) => setEntryTimeMode(entry, eventChecked(event))} />
-                    Use start/end time
-                  </label>
-                  <span class="duration">{entryDurationSummary(entry)}</span>
-                  <button class="icon danger-icon" onclick={() => removeEntry(selectedPeriod, entry.id)}><Trash2 size={16} /></button>
+            <div class:has-editor={Boolean(entryDraft)} class="entries-workspace">
+              <div class="entry-list">
+                <div class="entry-list-header" aria-hidden="true">
+                  <span>Date</span>
+                  <span>Time / Hours</span>
+                  <span>Billable</span>
+                  <span>Total</span>
+                  <span>Mode</span>
+                  <span>Actions</span>
                 </div>
-              {/each}
+                {#if selectedTimesheet.entries.length}
+                  {#each selectedTimesheet.entries as entry}
+                    <div class:active={editingEntryId === entry.id} class="entry-summary-row">
+                      <button class="entry-summary-main" aria-label={`Edit entry for ${entryDateLabel(entry.date)}`} onclick={() => openEntryEditor(entry)}>
+                        <span class="entry-date">
+                          <strong>{entryDateLabel(entry.date)}</strong>
+                          <small>{entryDayLabel(entry.date)}</small>
+                        </span>
+                        <span>
+                          <strong>{entryDurationSummary(entry)}</strong>
+                          {#if entry.description}
+                            <small>{entry.description}</small>
+                          {/if}
+                        </span>
+                        <span class:muted={!entry.billable}>{entry.billable ? 'Billable' : 'Non-billable'}</span>
+                        <span>{entryAmount(entry)}</span>
+                        <span>{entryModeLabel(entry)}</span>
+                      </button>
+                      <div class="entry-row-actions">
+                        <button class="secondary compact" onclick={() => openEntryEditor(entry)}>Edit</button>
+                        <button class="icon danger-icon" aria-label="Delete entry" onclick={() => removeEntry(selectedPeriod, entry.id)}><Trash2 size={16} /></button>
+                      </div>
+                    </div>
+                  {/each}
+                {:else}
+                  <div class="entry-list-empty">
+                    <p>No entries yet.</p>
+                    <button onclick={() => addEntry(selectedPeriod)}><Plus size={16} /> Add Entry</button>
+                  </div>
+                {/if}
+              </div>
+
+              {#if entryDraft}
+                <aside class="entry-editor-panel" aria-label="Timesheet entry editor">
+                  <div class="editor-head compact-head">
+                    <div>
+                      <span>{entryDraftIsNew ? 'New entry' : 'Editing entry'}</span>
+                      <h3>{entryDraft.date ? entryDateLabel(entryDraft.date) : 'Timesheet entry'}</h3>
+                    </div>
+                    <button class="secondary compact" onclick={() => closeEntryEditor()}>Close</button>
+                  </div>
+
+                  <div class="entry-editor-form">
+                    <label>Date <input type="date" bind:value={entryDraft.date} /></label>
+                    <label>Mode
+                      <select value={entryDraft.timeTrackingMode} onchange={(event) => setDraftTimeMode(eventValue(event) === 'time')}>
+                        <option value="duration">Hours only</option>
+                        <option value="time">Start / End time</option>
+                      </select>
+                    </label>
+
+                    {#if entryDraft.timeTrackingMode === 'time'}
+                      <div class="time-editor-grid">
+                        <label>Start <input type="time" value={entryDraft.startTime} oninput={(event) => updateDraftTiming('startTime', eventValue(event))} /></label>
+                        <label>End <input type="time" value={entryDraft.endTime} oninput={(event) => updateDraftTiming('endTime', eventValue(event))} /></label>
+                        <label>Break <input type="number" min="0" step="5" value={entryDraft.breakMinutes} oninput={(event) => updateDraftTiming('breakMinutes', eventNumber(event))} /></label>
+                      </div>
+                      <div class:error={Boolean(timeEntryError(entryDraft))} class="duration editor-total">
+                        <span>Calculated: {calculatedEntryDuration(entryDraft)}</span>
+                        {#if timeEntryError(entryDraft)}
+                          <small>{timeEntryError(entryDraft)}</small>
+                        {/if}
+                      </div>
+                    {:else}
+                      <label>Hours <input type="number" min="0" step="0.25" value={entryDraft.hours} oninput={(event) => updateDraftHours(eventNumber(event))} /></label>
+                    {/if}
+
+                    <label class="inline-check"><input type="checkbox" bind:checked={entryDraft.billable} /> Billable</label>
+                    <label class="wide">Description <textarea rows="5" placeholder="Work description" bind:value={entryDraft.description}></textarea></label>
+                  </div>
+
+                  <div class="entry-editor-actions">
+                    <button class="secondary" onclick={() => closeEntryEditor()}>Cancel</button>
+                    <button onclick={() => saveEntryDraft(selectedPeriod)}><CheckCircle2 size={16} /> Save changes</button>
+                  </div>
+                </aside>
+              {/if}
             </div>
           </section>
         </section>
@@ -1089,36 +1451,62 @@
       {/if}
     {:else if activeView === 'invoiceDetail'}
       {#if selectedClient && selectedInvoice}
-        <section class="detail-page">
-          <nav class="breadcrumb" aria-label="Breadcrumb">
-            <button onclick={() => openClient(selectedClient.id)}>{selectedClient.name || 'Client'}</button>
-            <span>&gt;</span>
-            <button onclick={() => { openClient(selectedClient.id); clientTab = 'invoices'; }}>Invoices</button>
-            <span>&gt;</span>
-            <strong>{selectedInvoice.invoiceNumber}</strong>
-          </nav>
-          <div class="detail-header">
+        <section class="client-workspace">
+          <div class="client-summary">
             <div>
-              <h2>{selectedInvoice.invoiceNumber}</h2>
-              <div class="record-meta">
-                <span>{selectedInvoice.status}</span>
-                <span>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</span>
-                <span>Template: {templateLabel(selectedInvoice.template)}</span>
-                <span>Due {selectedInvoice.dueDate}</span>
-              </div>
+              <h2>{selectedClient.name || 'Untitled client'}</h2>
+              <p>{selectedClient.email || selectedClient.contactName || 'Client workspace'}</p>
             </div>
-            <div class="actions">
-              <button class="secondary" onclick={() => generateInvoicePdfOnly(selectedInvoice)}><Download size={16} /> PDF</button>
-              <button class="secondary" onclick={() => duplicateInvoiceForClient(selectedInvoice)}><Copy size={16} /> Duplicate</button>
-              <button onclick={() => markInvoicePaid(selectedInvoice)}><CheckCircle2 size={16} /> Mark Paid</button>
-              <button class="secondary" onclick={() => archiveInvoiceForClient(selectedInvoice)}><Archive size={16} /> Archive</button>
+            <div class="summary-metrics">
+              <div><span>Outstanding</span><strong>{formatMoney(clientOutstanding(selectedClient.id), selectedClient.defaultCurrency)}</strong></div>
+              <div><span>Revenue YTD</span><strong>{formatMoney(clientRevenueYtd(selectedClient.id), selectedClient.defaultCurrency)}</strong></div>
+              <div><span>Hours YTD</span><strong>{formatHours(clientHoursYtd(selectedClient.id))}</strong></div>
             </div>
           </div>
-          <section class="detail-editor">
-            <div class="invoice-summary">
-              <strong>{selectedInvoice.invoiceNumber}</strong>
-              <span>{selectedInvoice.status} · Template: {templateLabel(selectedInvoice.template)} · Issue {selectedInvoice.issueDate} · Due {selectedInvoice.dueDate}</span>
-              <b>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</b>
+
+          <div class="client-tabs" role="tablist" aria-label="Client sections">
+            <button onclick={() => backToClientTab(selectedClient, 'overview')}>Overview</button>
+            <button onclick={() => backToClientTab(selectedClient, 'timesheets')}>Timesheets</button>
+            <button class="active" onclick={() => backToClientTab(selectedClient, 'invoices')}>Invoices</button>
+            <button onclick={() => backToClientTab(selectedClient, 'notes')}>Notes</button>
+            <button onclick={() => backToClientTab(selectedClient, 'settings')}>Settings</button>
+          </div>
+
+          <section class="tab-panel workspace-detail">
+            <div class="detail-card">
+              <div>
+                <button class="context-link" onclick={() => backToClientTab(selectedClient, 'invoices')}>← Back</button>
+                <small>{selectedInvoice.status}{selectedInvoice.archived ? ' · Archived' : ''}</small>
+                <h2>{selectedInvoice.invoiceNumber}</h2>
+                <div class="record-meta">
+                  <span>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</span>
+                  <span>Due {selectedInvoice.dueDate}</span>
+                  <span>Issue {selectedInvoice.issueDate}</span>
+                  <span>Template: {templateLabel(selectedInvoice.template)}</span>
+                </div>
+              </div>
+              <div class="actions">
+                <button class="secondary" onclick={() => generateInvoicePdfOnly(selectedInvoice)}><Download size={16} /> PDF</button>
+                {#if selectedInvoice.status !== 'paid'}
+                  <button onclick={() => markInvoicePaid(selectedInvoice)}><CheckCircle2 size={16} /> Mark Paid</button>
+                {/if}
+                <div class="more-menu-wrap" data-detail-more>
+                  <button class="secondary more-button" aria-haspopup="menu" aria-expanded={openDetailMenu === 'invoice'} aria-label="More invoice actions" onclick={() => toggleDetailMenu('invoice')}>
+                    <MoreHorizontal size={16} /> More
+                  </button>
+                  {#if openDetailMenu === 'invoice'}
+                    <div class="more-menu" role="menu">
+                      <button role="menuitem" onclick={() => { duplicateInvoiceForClient(selectedInvoice); closeDetailMenu(); }}><Copy size={16} /> Duplicate</button>
+                      <button role="menuitem" onclick={() => { archiveInvoiceForClient(selectedInvoice); closeDetailMenu(); }}><Archive size={16} /> Archive</button>
+                      <button class="danger-menu-item" role="menuitem" onclick={() => { deleteInvoiceForClient(selectedInvoice); closeDetailMenu(); }}><Trash2 size={16} /> Delete</button>
+                    </div>
+                  {/if}
+                </div>
+              </div>
+            </div>
+            <div class="section-title">
+              <h2>Invoice details</h2>
+              <strong>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</strong>
             </div>
             <div class="form-grid invoice-options" oninput={() => touch('Invoice saved')}>
               <label>Invoice Template
@@ -1129,17 +1517,70 @@
                 </select>
               </label>
             </div>
-            <div class="entry-list" oninput={() => touch('Invoice saved')}>
-              {#each selectedInvoice.items as item}
-                <div class="item-grid">
-                  <label>Description <input bind:value={item.description} /></label>
-                  <label>Quantity <input type="number" min="0" step="0.01" bind:value={item.quantity} /></label>
-                  <label>Unit price <input type="number" min="0" step="0.01" bind:value={item.unitPrice} /></label>
-                  <span class="duration">{formatMoney(Number(item.quantity || 0) * Number(item.unitPrice || 0), selectedInvoice.currency)}</span>
-                  <button class="icon danger-icon" onclick={() => { selectedInvoice.items = selectedInvoice.items.filter((row) => row.id !== item.id); touch('Item removed'); }}><Trash2 size={16} /></button>
+            <div class="section-title">
+              <h2>Invoice items</h2>
+              <button onclick={() => addInvoiceItem(selectedInvoice)}><Plus size={16} /> Add Item</button>
+            </div>
+            <div class:has-editor={Boolean(invoiceItemDraft)} class="entries-workspace">
+              <div class="entry-list">
+                <div class="entry-list-header invoice-list-header" aria-hidden="true">
+                  <span>Description</span>
+                  <span>Quantity</span>
+                  <span>Rate</span>
+                  <span>Amount</span>
+                  <span>Actions</span>
                 </div>
-              {/each}
-              <button class="secondary" onclick={() => { selectedInvoice.items = [...selectedInvoice.items, emptyInvoiceItem()]; touch('Item added'); }}><Plus size={16} /> Add Invoice Item</button>
+                {#if selectedInvoice.items.length}
+                  {#each selectedInvoice.items as item}
+                    <div class:active={editingInvoiceItemId === item.id} class="entry-summary-row">
+                      <button class="entry-summary-main invoice-summary-main" aria-label={`Edit invoice item ${item.description || item.id}`} onclick={() => openInvoiceItemEditor(item)}>
+                        <span>
+                          <strong>{item.description || 'Untitled item'}</strong>
+                          <small>{Number(item.quantity || 0).toLocaleString('en-GB')} × {formatMoney(Number(item.unitPrice || 0), selectedInvoice.currency)}</small>
+                        </span>
+                        <span>{Number(item.quantity || 0).toLocaleString('en-GB')}</span>
+                        <span>{formatMoney(Number(item.unitPrice || 0), selectedInvoice.currency)}</span>
+                        <span>{invoiceItemAmount(item, selectedInvoice)}</span>
+                      </button>
+                      <div class="entry-row-actions">
+                        <button class="secondary compact" onclick={() => openInvoiceItemEditor(item)}>Edit</button>
+                        <button class="icon danger-icon" aria-label="Delete invoice item" onclick={() => removeInvoiceItem(selectedInvoice, item.id)}><Trash2 size={16} /></button>
+                      </div>
+                    </div>
+                  {/each}
+                {:else}
+                  <div class="entry-list-empty">
+                    <p>No invoice items yet.</p>
+                    <button onclick={() => addInvoiceItem(selectedInvoice)}><Plus size={16} /> Add Item</button>
+                  </div>
+                {/if}
+              </div>
+
+              {#if invoiceItemDraft}
+                <aside class="entry-editor-panel" aria-label="Invoice item editor">
+                  <div class="editor-head compact-head">
+                    <div>
+                      <span>{invoiceItemDraftIsNew ? 'New invoice item' : 'Editing invoice item'}</span>
+                      <h3>{invoiceItemDraft.description || 'Invoice item'}</h3>
+                    </div>
+                    <button class="secondary compact" onclick={() => closeInvoiceItemEditor()}>Close</button>
+                  </div>
+
+                  <div class="entry-editor-form">
+                    <label class="wide">Description <textarea rows="4" placeholder="Item description" bind:value={invoiceItemDraft.description}></textarea></label>
+                    <label>Quantity <input type="number" min="0" step="0.01" bind:value={invoiceItemDraft.quantity} /></label>
+                    <label>Rate <input type="number" min="0" step="0.01" bind:value={invoiceItemDraft.unitPrice} /></label>
+                    <div class="duration editor-total">
+                      <span>Amount: {invoiceItemAmount(invoiceItemDraft, selectedInvoice)}</span>
+                    </div>
+                  </div>
+
+                  <div class="entry-editor-actions">
+                    <button class="secondary" onclick={() => closeInvoiceItemEditor()}>Cancel</button>
+                    <button onclick={() => saveInvoiceItemDraft(selectedInvoice)}><CheckCircle2 size={16} /> Save changes</button>
+                  </div>
+                </aside>
+              {/if}
             </div>
           </section>
         </section>
