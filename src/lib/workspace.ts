@@ -385,11 +385,24 @@ export function ensureBillingPeriods(workspace: Workspace) {
     existing.add(key);
   }
 
+  // Invoices already linked to a period (usually via a timesheet) must not spawn
+  // a second period in their issue month.
+  const linkedInvoiceIds = new Set(periods.map((period) => period.invoiceId).filter(Boolean));
+
   for (const invoice of workspace.invoices) {
+    if (linkedInvoiceIds.has(invoice.id)) continue;
     const date = new Date(`${invoice.issueDate || todayIso()}T12:00:00`);
     const month = date.getMonth() + 1;
     const year = date.getFullYear();
     const key = periodKey(invoice.clientId, month, year);
+    const found = periods.find((period) => periodKey(period.clientId, period.month, period.year) === key && !period.invoiceId);
+    if (found) {
+      found.invoiceId = invoice.id;
+      found.status = statusForPeriod(found, invoice);
+      found.archived = found.archived || invoice.archived;
+      linkedInvoiceIds.add(invoice.id);
+      continue;
+    }
     if (existing.has(key)) continue;
     periods.push({
       ...emptyBillingPeriod(invoice.clientId, month, year),
@@ -397,6 +410,8 @@ export function ensureBillingPeriods(workspace: Workspace) {
       status: invoice.status === 'paid' ? 'paid' : 'invoiced',
       archived: invoice.archived
     });
+    existing.add(key);
+    linkedInvoiceIds.add(invoice.id);
   }
 
   return periods.sort((a, b) => b.year - a.year || b.month - a.month || clientName(workspace.clients, a.clientId).localeCompare(clientName(workspace.clients, b.clientId)));

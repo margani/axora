@@ -125,6 +125,8 @@
   $: revenueThisYear = workspace.invoices
     .filter((invoice) => !invoice.archived && invoice.status === 'paid' && invoice.issueDate.startsWith(yearPrefix))
     .reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
+  $: activeClients = workspace.clients.filter((client) => !client.archived);
+  $: archivedClients = workspace.clients.filter((client) => client.archived);
   $: overdueInvoices = workspace.invoices.filter((invoice) => !invoice.archived && isOverdue(invoice));
   $: draftInvoices = workspace.invoices.filter((invoice) => !invoice.archived && invoice.status === 'draft');
   $: uninvoicedPeriods = workspace.billingPeriods.filter(
@@ -883,6 +885,13 @@
     switchView('clients');
   }
 
+  function archiveClient(client: Client, archived: boolean) {
+    client.archived = archived;
+    addActivity(activity(`${archived ? 'Archived' : 'Restored'} ${client.name || 'client'}`, 'archive'));
+    touch(archived ? 'Client archived' : 'Client restored');
+    showToast(archived ? 'Client archived' : 'Client restored');
+  }
+
   function deleteClient(client: Client) {
     if (!confirm(`Delete ${client.name || 'this client'}? Timesheets and invoices keep their client id.`)) return;
     replaceWorkspace({ ...workspace, clients: workspace.clients.filter((item) => item.id !== client.id) }, 'Client deleted');
@@ -987,6 +996,7 @@
   function filteredPeriods(clientId: string, search: string, filter: string, sort: SortOrder) {
     const needle = search.trim().toLowerCase();
     return clientPeriods(clientId)
+      .filter((period) => period.timesheetId)
       .filter((period) => filter === 'archived' || !period.archived)
       .filter((period) => `${periodTitle(period)} ${period.notes}`.toLowerCase().includes(needle))
       .sort((a, b) => (sort === 'newest' ? b.year - a.year || b.month - a.month : a.year - b.year || a.month - b.month));
@@ -1046,9 +1056,14 @@
           <span>Clients</span>
         </button>
         <div class="client-nav">
-          {#each workspace.clients as client}
+          {#each activeClients as client}
             <button class:active={(activeView === 'clients' || activeView === 'timesheetDetail' || activeView === 'invoiceDetail') && selectedClientId === client.id} onclick={() => openClient(client.id)}>
               <span>{client.name || 'Untitled client'}</span>
+            </button>
+          {/each}
+          {#each archivedClients as client}
+            <button class="archived-nav" class:active={selectedClientId === client.id} onclick={() => openClient(client.id)}>
+              <span>{client.name || 'Untitled client'} · archived</span>
             </button>
           {/each}
         </div>
@@ -1162,9 +1177,9 @@
           </div>
         </section>
       {/if}
-      {#if workspace.clients.length}
+      {#if activeClients.length}
         <section class="period-grid">
-          {#each workspace.clients as client}
+          {#each activeClients as client}
             <article class="period-card client-overview">
               <div>
                 <h3>{client.name || 'Untitled client'}</h3>
@@ -1229,7 +1244,7 @@
                   </div>
                 </div>
                 <div class="mini-card-list">
-                  {#each selectedClientPeriods.filter((period) => !period.archived).slice(0, 3) as period}
+                  {#each selectedClientPeriods.filter((period) => !period.archived && period.timesheetId).slice(0, 3) as period}
                     <article class="mini-card">
                       <div>
                         <h3>{periodTitle(period)}</h3>
@@ -1241,6 +1256,8 @@
                         <button class="secondary" onclick={() => generateInvoiceForPeriod(period)}><ReceiptText size={16} /> Invoice</button>
                       </div>
                     </article>
+                  {:else}
+                    <p class="mini-empty">No timesheets yet. Create one to start logging hours.</p>
                   {/each}
                 </div>
               </div>
@@ -1264,6 +1281,8 @@
                         <button class="secondary" onclick={() => generateInvoicePdfOnly(invoice)}><Download size={16} /> PDF</button>
                       </div>
                     </article>
+                  {:else}
+                    <p class="mini-empty">No invoices yet. Generate one from a timesheet or add a manual invoice.</p>
                   {/each}
                 </div>
               </div>
@@ -1284,7 +1303,10 @@
             <section class="tab-panel">
               <div class="section-title">
                 <h2>Timesheets</h2>
-                <button class="secondary" onclick={() => createNextTimesheet(selectedClient)}><Copy size={16} /> Create Next Timesheet</button>
+                <div class="actions">
+                  <button onclick={() => createTimesheetForClient(selectedClient)}><Plus size={16} /> New Timesheet</button>
+                  <button class="secondary" onclick={() => createNextTimesheet(selectedClient)}><Copy size={16} /> Next Month</button>
+                </div>
               </div>
               <div class="list-tools">
                 <input bind:value={timesheetSearch} placeholder="Search timesheets" />
@@ -1302,7 +1324,14 @@
                   <article class="period-card">
                     <div>
                       <h3>{periodTitle(period)}</h3>
-                      <small>{periodInvoice(period)?.status ?? 'No invoice'}{period.archived ? ' · Archived' : ''}</small>
+                      <small class="badge-row">
+                        {#if periodInvoice(period)}
+                          <span class="badge status-{effectiveStatus(periodInvoice(period)!)}">{statusLabel(effectiveStatus(periodInvoice(period)!))}</span>
+                        {:else}
+                          <span class="badge muted-badge">Not invoiced</span>
+                        {/if}
+                        {#if period.archived}<span class="badge muted-badge">Archived</span>{/if}
+                      </small>
                     </div>
                     <div class="period-metrics">
                       <strong>{formatHours(periodHours(period))}</strong>
@@ -1311,10 +1340,16 @@
                     <div class="actions">
                       <button onclick={() => openPeriod(period)}>Open</button>
                       <button class="secondary" onclick={() => duplicateTimesheetPeriod(period)}><Copy size={16} /> Duplicate</button>
-                      <button class="secondary" onclick={() => generateInvoiceForPeriod(period)}><ReceiptText size={16} /> Invoice</button>
-                      <button class="secondary" onclick={() => archivePeriod(period)}><Archive size={16} /> Archive</button>
+                      {#if periodInvoice(period)}
+                        <button class="secondary" onclick={() => openInvoice(periodInvoice(period)!)}><ReceiptText size={16} /> Invoice</button>
+                      {:else}
+                        <button class="secondary" onclick={() => generateInvoiceForPeriod(period)}><ReceiptText size={16} /> Invoice</button>
+                      {/if}
+                      <button class="secondary" onclick={() => archivePeriod(period, !period.archived)}><Archive size={16} /> {period.archived ? 'Restore' : 'Archive'}</button>
                     </div>
                   </article>
+                {:else}
+                  <p class="mini-empty">No timesheets match. Create one to start logging hours.</p>
                 {/each}
               </div>
             </section>
@@ -1359,6 +1394,8 @@
                       <button class="secondary" onclick={() => archiveInvoiceForClient(invoice, !invoice.archived)}><Archive size={16} /> {invoice.archived ? 'Restore' : 'Archive'}</button>
                     </div>
                   </article>
+                {:else}
+                  <p class="mini-empty">No invoices match. Generate one from a timesheet or add a manual invoice.</p>
                 {/each}
               </div>
             </section>
@@ -1394,6 +1431,9 @@
                 <label class="wide">Address <textarea rows="4" bind:value={selectedClient.address}></textarea></label>
               </div>
               <div class="actions danger-zone">
+                <button class="secondary" onclick={() => archiveClient(selectedClient, !selectedClient.archived)}>
+                  <Archive size={16} /> {selectedClient.archived ? 'Restore Client' : 'Archive Client'}
+                </button>
                 <button class="danger" onclick={() => deleteClient(selectedClient)}><Trash2 size={16} /> Delete Client</button>
               </div>
             </section>

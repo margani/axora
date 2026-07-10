@@ -1400,15 +1400,29 @@ button.context-link:hover {
   }
 
   nav {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    display: flex;
+    gap: 8px;
   }
 
-  nav button {
+  .nav-group {
+    flex: 1;
+    display: flex;
+  }
+
+  nav > button,
+  .nav-group > button {
+    flex: 1;
     justify-content: center;
     padding: 0 8px;
   }
 
-  nav button span {
+  /* The per-client list is reachable from the Clients page on small screens. */
+  .client-nav {
+    display: none;
+  }
+
+  nav > button span,
+  .nav-group > button span {
     display: none;
   }
 
@@ -1677,4 +1691,19 @@ button.context-link:hover {
   font-weight: 750;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* Archived client nav item and empty-list hints */
+.client-nav button.archived-nav {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.mini-empty {
+  padding: 18px;
+  color: #6b6f6a;
+  font-size: 0.92rem;
+  background: #f7f3ea;
+  border: 1px dashed #ddd2bf;
+  border-radius: 10px;
 }
