@@ -1444,17 +1444,29 @@
             <div class="detail-card">
               <div>
                 <button class="context-link" onclick={() => backToClientTab(selectedClient, 'timesheets')}>← Back</button>
-                <small>{periodInvoice(selectedPeriod)?.status ?? 'No invoice'}{selectedPeriod.archived ? ' · Archived' : ''}</small>
-                <h2>{periodTitle(selectedPeriod)}</h2>
+                <div class="record-title-row">
+                  <h2>{selectedTimesheet.title || periodTitle(selectedPeriod)}</h2>
+                  {#if periodInvoice(selectedPeriod)}
+                    <button class="badge status-{effectiveStatus(periodInvoice(selectedPeriod)!)}" onclick={() => openInvoice(periodInvoice(selectedPeriod)!)}>{statusLabel(effectiveStatus(periodInvoice(selectedPeriod)!))}</button>
+                  {:else}
+                    <span class="badge muted-badge">Not invoiced</span>
+                  {/if}
+                  {#if selectedPeriod.archived}<span class="badge muted-badge">Archived</span>{/if}
+                </div>
                 <div class="record-meta">
+                  <span>{periodTitle(selectedPeriod)}</span>
                   <span>{formatHours(periodHours(selectedPeriod))}</span>
                   <span>{formatMoney(periodValue(selectedPeriod), periodCurrency(selectedPeriod))}</span>
                   <span>{selectedTimesheet.currency} · {formatMoney(selectedTimesheet.hourlyRate, selectedTimesheet.currency)}/h</span>
                 </div>
               </div>
               <div class="actions">
-                <button class="secondary" onclick={() => generatePeriodPdf(selectedPeriod)}><Download size={16} /> PDF</button>
-                <button onclick={() => generateInvoiceForPeriod(selectedPeriod)}><ReceiptText size={16} /> Generate Invoice</button>
+                <button class="secondary" onclick={() => generatePeriodPdf(selectedPeriod)}><Download size={16} /> Timesheet PDF</button>
+                {#if periodInvoice(selectedPeriod)}
+                  <button onclick={() => openInvoice(periodInvoice(selectedPeriod)!)}><ReceiptText size={16} /> Open Invoice</button>
+                {:else}
+                  <button onclick={() => generateInvoiceForPeriod(selectedPeriod)}><ReceiptText size={16} /> Generate Invoice</button>
+                {/if}
                 <div class="more-menu-wrap" data-detail-more>
                   <button class="secondary more-button" aria-haspopup="menu" aria-expanded={openDetailMenu === 'timesheet'} aria-label="More timesheet actions" onclick={() => toggleDetailMenu('timesheet')}>
                     <MoreHorizontal size={16} /> More
@@ -1468,6 +1480,12 @@
                   {/if}
                 </div>
               </div>
+            </div>
+            <div class="section-title"><h2>Timesheet details</h2></div>
+            <div class="form-grid" oninput={() => touch('Timesheet saved')}>
+              <label class="wide">Title <input bind:value={selectedTimesheet.title} placeholder="e.g. Product engineering" /></label>
+              <label>Hourly rate <input type="number" min="0" step="0.01" bind:value={selectedTimesheet.hourlyRate} /></label>
+              <label>Currency <input bind:value={selectedTimesheet.currency} /></label>
             </div>
             <div class="section-title">
               <h2>Entries</h2>

@@ -81,19 +81,33 @@ function companyBlock(doc: jsPDF, parties: Parties, x: number, y: number) {
     doc.text(parties.phone, x, next);
     next += 5;
   }
-  if (parties.vatNumber) doc.text(`VAT ${parties.vatNumber}`, x, next);
+  if (parties.vatNumber) {
+    doc.text(`VAT ${parties.vatNumber}`, x, next);
+    next += 5;
+  }
+  return next;
 }
 
-export function generateInvoicePdf(workspace: Workspace, invoice: Invoice) {
+/** Build the invoice document without triggering a download (used by tests). */
+export function buildInvoiceDoc(workspace: Workspace, invoice: Invoice) {
   const doc = new jsPDF();
   const ctx: PdfContext = { doc, workspace, parties: resolveParties(workspace, invoice) };
   if (invoice.template === 'modern') renderModernInvoice(ctx, invoice);
   else if (invoice.template === 'compact') renderCompactInvoice(ctx, invoice);
   else renderClassicInvoice(ctx, invoice);
-  doc.save(`${invoice.invoiceNumber || 'invoice'}.pdf`);
+  return doc;
+}
+
+export function generateInvoicePdf(workspace: Workspace, invoice: Invoice) {
+  buildInvoiceDoc(workspace, invoice).save(`${invoice.invoiceNumber || 'invoice'}.pdf`);
 }
 
 export function generateTimesheetPdf(workspace: Workspace, timesheet: Timesheet) {
+  buildTimesheetDoc(workspace, timesheet).save(`${timesheet.title || 'timesheet'}.pdf`);
+}
+
+/** Build the timesheet document without triggering a download (used by tests). */
+export function buildTimesheetDoc(workspace: Workspace, timesheet: Timesheet) {
   const doc = new jsPDF();
   const client = workspace.clients.find((item) => item.id === timesheet.clientId);
   doc.setFont('helvetica', 'bold');
@@ -133,7 +147,7 @@ export function generateTimesheetPdf(workspace: Workspace, timesheet: Timesheet)
   doc.setFont('helvetica', 'bold');
   doc.text(`Billable hours: ${formatHours(billableMinutes(timesheet))}`, 16, y);
   doc.text(`Total: ${money(timesheetTotal(timesheet), timesheet.currency)}`, 120, y);
-  doc.save(`${timesheet.title || 'timesheet'}.pdf`);
+  return doc;
 }
 
 function clientBlock(doc: jsPDF, parties: Parties, x: number, y: number) {
@@ -154,11 +168,11 @@ function renderClassicInvoice({ doc, workspace, parties }: PdfContext, invoice: 
   doc.text('Invoice', workspace.settings.companyLogo ? 46 : 16, 20);
   doc.setFontSize(12);
   doc.text(invoice.invoiceNumber, workspace.settings.companyLogo ? 46 : 16, 30);
-  companyBlock(doc, parties, 130, 20);
+  const companyEnd = companyBlock(doc, parties, 130, 20);
   doc.setFont('helvetica', 'bold');
   doc.text('Bill to', 16, 52);
   clientBlock(doc, parties, 16, 60);
-  metaBlock(doc, invoice, 130, 52);
+  metaBlock(doc, invoice, 130, Math.max(companyEnd + 4, 52));
   const tableEnd = renderInvoiceTable(doc, invoice, 16, 95, 112);
   renderTotals(doc, invoice, tableEnd + 6);
   renderPaymentBlock(doc, parties, invoice, 16, Math.max(tableEnd + 40, 235));
@@ -216,14 +230,19 @@ function metaBlock(doc: jsPDF, invoice: Invoice, x: number, y: number) {
   rows.forEach((row, index) => doc.text(row, x, y + index * 6));
 }
 
-function renderInvoiceTable(doc: jsPDF, invoice: Invoice, x: number, y: number, descWidth: number) {
+function renderInvoiceTable(doc: jsPDF, invoice: Invoice, x: number, y: number, _descWidth: number) {
+  const right = 195;
+  const totalRight = right;
+  const unitRight = right - 34;
+  const qtyRight = unitRight - 30;
+  const descWidth = qtyRight - x - 16;
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
   doc.text('Description', x, y);
-  doc.text('Qty', x + descWidth + 8, y);
-  doc.text('Unit', x + descWidth + 32, y);
-  doc.text('Total', x + descWidth + 64, y);
-  doc.line(x, y + 3, 195, y + 3);
+  doc.text('Qty', qtyRight, y, { align: 'right' });
+  doc.text('Unit', unitRight, y, { align: 'right' });
+  doc.text('Total', totalRight, y, { align: 'right' });
+  doc.line(x, y + 3, right, y + 3);
   doc.setFont('helvetica', 'normal');
   let nextY = y + 12;
   for (const item of invoice.items) {
@@ -233,12 +252,12 @@ function renderInvoiceTable(doc: jsPDF, invoice: Invoice, x: number, y: number, 
     }
     const rowStart = nextY;
     nextY = addWrapped(doc, item.description, x, nextY, descWidth, 5);
-    doc.text(String(item.quantity || 0), x + descWidth + 8, rowStart);
-    doc.text(money(Number(item.unitPrice || 0), invoice.currency), x + descWidth + 32, rowStart);
-    doc.text(money(Number(item.quantity || 0) * Number(item.unitPrice || 0), invoice.currency), x + descWidth + 64, rowStart);
+    doc.text(String(item.quantity || 0), qtyRight, rowStart, { align: 'right' });
+    doc.text(money(Number(item.unitPrice || 0), invoice.currency), unitRight, rowStart, { align: 'right' });
+    doc.text(money(Number(item.quantity || 0) * Number(item.unitPrice || 0), invoice.currency), totalRight, rowStart, { align: 'right' });
     nextY += 4;
   }
-  doc.line(x, nextY + 2, 195, nextY + 2);
+  doc.line(x, nextY + 2, right, nextY + 2);
   return nextY + 2;
 }
 
