@@ -35,6 +35,8 @@ export type Client = {
   defaultPaymentTermsDays: number;
   defaultInvoiceTemplate: InvoiceTemplate | '';
   defaultServiceDescription: string;
+  defaultTaxRate: number;
+  archived: boolean;
 };
 
 export type TimesheetEntry = {
@@ -72,6 +74,37 @@ export type InvoiceItem = {
   unitPrice: number;
 };
 
+/**
+ * A point-in-time copy of the supplier and customer details captured when an
+ * invoice is issued. Once captured, later edits to the business profile or the
+ * client no longer alter an already-issued invoice.
+ */
+export type InvoiceSnapshot = {
+  capturedAt: string;
+  business: {
+    companyName: string;
+    contactName: string;
+    address: string;
+    email: string;
+    phone: string;
+    companyNumber: string;
+    vatNumber: string;
+    bankName: string;
+    accountName: string;
+    sortCode: string;
+    accountNumber: string;
+    iban: string;
+  };
+  client: {
+    name: string;
+    contactName: string;
+    address: string;
+    email: string;
+    companyNumber: string;
+    vatNumber: string;
+  };
+};
+
 export type Invoice = {
   id: string;
   invoiceNumber: string;
@@ -83,6 +116,14 @@ export type Invoice = {
   template: InvoiceTemplate;
   items: InvoiceItem[];
   notes: string;
+  poReference: string;
+  discountPercent: number;
+  taxRate: number;
+  amountPaid: number;
+  sentDate: string;
+  paidDate: string;
+  timesheetId: string;
+  snapshot: InvoiceSnapshot | null;
   archived: boolean;
   lastPdfGeneratedAt: string;
 };
@@ -108,17 +149,22 @@ export type ActivityEvent = {
   billingPeriodId?: string;
 };
 
+export type WorkspaceSettings = {
+  currency: Currency;
+  invoiceTemplate: InvoiceTemplate;
+  companyLogo: string;
+  invoicePrefix: string;
+  nextInvoiceNumber: number;
+  defaultTaxRate: number;
+};
+
 export type Workspace = {
-  version: 3;
+  version: 4;
   profile: Profile;
   clients: Client[];
   billingPeriods: BillingPeriod[];
   timesheets: Timesheet[];
   invoices: Invoice[];
   activity: ActivityEvent[];
-  settings: {
-    currency: Currency;
-    invoiceTemplate: InvoiceTemplate;
-    companyLogo: string;
-  };
+  settings: WorkspaceSettings;
 };

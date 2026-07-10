@@ -13,6 +13,7 @@
     Plus,
     ReceiptText,
     Search,
+    Send,
     Settings,
     Trash2,
     Upload
@@ -33,12 +34,14 @@
     activity,
     addDays,
     billableMinutes,
+    buildInvoiceSnapshot,
     calculateTimeEntryMinutes,
     clientDefaults,
     clearWorkspace,
     clientName,
     downloadJson,
     duplicateInvoice,
+    effectiveStatus,
     emptyBillingPeriod,
     emptyClient,
     emptyWorkspace,
@@ -51,12 +54,16 @@
     hasSavedWorkspace,
     invoiceFromTimesheet,
     invoiceTotal,
+    invoiceTotals,
+    isOverdue,
+    lineTotal,
     loadWorkspace,
     monthName,
     nextInvoiceNumber,
     nextMonth,
     normalizeWorkspace,
     saveWorkspace,
+    statusLabel,
     syncEntryDurationFromTime,
     entryMinutes,
     timesheetTotal,
@@ -69,6 +76,9 @@
   type DetailMenu = '' | 'timesheet' | 'invoice';
 
   let workspace: Workspace = emptyWorkspace();
+  const todayDate = todayIso();
+  const yearPrefix = todayDate.slice(0, 4);
+  const monthPrefix = todayDate.slice(0, 7);
   let activeView: View = 'dashboard';
   let selectedClientId = '';
   let selectedPeriodId = '';
@@ -105,14 +115,24 @@
   $: selectedPeriod = selectedClientPeriods.find((period) => period.id === selectedPeriodId) ?? selectedClientPeriods[0];
   $: selectedTimesheet = selectedPeriod ? periodTimesheet(selectedPeriod) : undefined;
   $: selectedInvoice = selectedInvoiceId ? workspace.invoices.find((invoice) => invoice.id === selectedInvoiceId) : selectedPeriod ? periodInvoice(selectedPeriod) : undefined;
+  $: invoiceBreakdown = selectedInvoice ? invoiceTotals(selectedInvoice) : null;
   $: totalOutstanding = workspace.invoices
     .filter((invoice) => !invoice.archived && invoice.status !== 'paid' && invoice.status !== 'void')
     .reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
-  $: revenueThisMonth = paidInvoicesForMonth(new Date().getMonth() + 1, new Date().getFullYear()).reduce(
-    (sum, invoice) => sum + invoiceTotal(invoice),
-    0
+  $: revenueThisMonth = workspace.invoices
+    .filter((invoice) => !invoice.archived && invoice.status === 'paid' && invoice.issueDate.startsWith(monthPrefix))
+    .reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
+  $: revenueThisYear = workspace.invoices
+    .filter((invoice) => !invoice.archived && invoice.status === 'paid' && invoice.issueDate.startsWith(yearPrefix))
+    .reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
+  $: activeClients = workspace.clients.filter((client) => !client.archived);
+  $: archivedClients = workspace.clients.filter((client) => client.archived);
+  $: overdueInvoices = workspace.invoices.filter((invoice) => !invoice.archived && isOverdue(invoice));
+  $: draftInvoices = workspace.invoices.filter((invoice) => !invoice.archived && invoice.status === 'draft');
+  $: uninvoicedPeriods = workspace.billingPeriods.filter(
+    (period) => !period.archived && period.timesheetId && !period.invoiceId && periodHours(period) > 0
   );
-  $: revenueThisYear = paidInvoicesForYear(new Date().getFullYear()).reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
+  $: attentionCount = overdueInvoices.length + draftInvoices.length + uninvoicedPeriods.length;
   $: hoursThisMonth = workspace.timesheets
     .filter((timesheet) => !timesheet.archived && timesheet.month === new Date().getMonth() + 1 && timesheet.year === new Date().getFullYear())
     .reduce((sum, timesheet) => sum + billableMinutes(timesheet), 0);
@@ -122,8 +142,8 @@
   $: recentActivity = [...workspace.activity].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8);
   $: allClientActivity = selectedClient ? activityForClient(selectedClient.id) : [];
   $: clientActivity = allClientActivity.slice(0, 3);
-  $: filteredClientPeriods = selectedClient ? filteredPeriods(selectedClient.id) : [];
-  $: filteredClientInvoices = selectedClient ? filteredInvoices(selectedClient.id) : [];
+  $: filteredClientPeriods = selectedClient ? filteredPeriods(selectedClient.id, timesheetSearch, timesheetFilter, timesheetSort) : [];
+  $: filteredClientInvoices = selectedClient ? filteredInvoices(selectedClient.id, invoiceSearch, invoiceFilter, invoiceSort) : [];
   $: searchResults = buildSearchResults(searchQuery);
   $: selectedEntryExists = Boolean(editingEntryId && selectedTimesheet?.entries.some((entry) => entry.id === editingEntryId));
   $: if (editingEntryId && !selectedEntryExists && !entryDraftIsNew) closeEntryEditor(false);
@@ -364,15 +384,6 @@
       .reduce((sum, timesheet) => sum + billableMinutes(timesheet), 0);
   }
 
-  function paidInvoicesForMonth(month: number, year: number) {
-    const prefix = `${year}-${String(month).padStart(2, '0')}`;
-    return workspace.invoices.filter((invoice) => !invoice.archived && invoice.status === 'paid' && invoice.issueDate.startsWith(prefix));
-  }
-
-  function paidInvoicesForYear(year: number) {
-    return workspace.invoices.filter((invoice) => !invoice.archived && invoice.status === 'paid' && invoice.issueDate.startsWith(String(year)));
-  }
-
   function activityForClient(clientId: string) {
     const periodIds = new Set(workspace.billingPeriods.filter((period) => period.clientId === clientId).map((period) => period.id));
     const name = clientName(workspace.clients, clientId).toLowerCase();
@@ -426,6 +437,11 @@
     clearToast();
   }
 
+  function openSourceTimesheet(invoice: Invoice) {
+    const period = workspace.billingPeriods.find((item) => item.timesheetId === invoice.timesheetId);
+    if (period) openPeriod(period);
+  }
+
   function openInvoice(invoice: Invoice) {
     selectedClientId = invoice.clientId;
     selectedInvoiceId = invoice.id;
@@ -456,6 +472,12 @@
     openDetailMenu = '';
   }
 
+  function takeInvoiceNumber() {
+    const { invoiceNumber, nextCounter } = nextInvoiceNumber(workspace);
+    workspace.settings = { ...workspace.settings, nextInvoiceNumber: nextCounter };
+    return invoiceNumber;
+  }
+
   function createInvoiceForClient(client: Client) {
     const period = selectedPeriod?.clientId === client.id ? selectedPeriod : (clientPeriods(client.id)[0] ?? createTimesheetForClient(client));
     generateInvoiceForPeriod(period);
@@ -464,42 +486,49 @@
   function generateInvoiceForPeriod(period: BillingPeriod) {
     const timesheet = periodTimesheet(period);
     if (!timesheet) return;
+    const existing = periodInvoice(period);
+    if (existing) {
+      showToast(`${period.year}-${period.month} is already invoiced as ${existing.invoiceNumber}`);
+      openInvoice(existing);
+      return;
+    }
     const client = workspace.clients.find((item) => item.id === period.clientId);
     const defaults = clientDefaults(client, workspace);
-    const invoice =
-      periodInvoice(period) ??
-      invoiceFromTimesheet(timesheet, nextInvoiceNumber(workspace.invoices), defaults.paymentTermsDays, defaults.invoiceTemplate);
-    if (!period.invoiceId) {
-      invoice.items[0].description = `${client?.defaultServiceDescription || 'Professional services'} - ${monthName(period.month)} ${period.year}`;
-      period.invoiceId = invoice.id;
-      workspace.invoices = [invoice, ...workspace.invoices];
-    }
-    period.status = invoice.status === 'paid' ? 'paid' : 'invoiced';
-    addActivity(activity(`Created Invoice ${invoice.invoiceNumber}`, 'invoice', period.id));
+    const invoice = invoiceFromTimesheet(timesheet, takeInvoiceNumber(), defaults.paymentTermsDays, defaults.invoiceTemplate, defaults.taxRate);
+    invoice.items[0].description = `${defaults.serviceDescription} — ${monthName(period.month)} ${period.year}`;
+    period.invoiceId = invoice.id;
+    period.status = 'invoiced';
+    workspace.invoices = [invoice, ...workspace.invoices];
+    addActivity(activity(`Created ${invoice.invoiceNumber} from ${clientName(workspace.clients, period.clientId)} ${periodTitle(period)}`, 'invoice', period.id));
     touch('Invoice generated');
-    showToast('Invoice generated');
+    showToast(`Created ${invoice.invoiceNumber}`);
+    openInvoice(invoice);
   }
 
   function createStandaloneInvoice(client: Client) {
     const defaults = clientDefaults(client, workspace);
     const invoice = emptyInvoice(client.id, defaults.currency, defaults.invoiceTemplate);
-    invoice.invoiceNumber = nextInvoiceNumber(workspace.invoices);
+    invoice.invoiceNumber = takeInvoiceNumber();
+    invoice.taxRate = defaults.taxRate;
     invoice.dueDate = addDays(todayIso(), defaults.paymentTermsDays);
-    invoice.items[0].description = client.defaultServiceDescription || 'Professional services';
+    invoice.items[0].description = defaults.serviceDescription;
     invoice.items[0].unitPrice = defaults.hourlyRate;
     workspace.invoices = [invoice, ...workspace.invoices];
-    addActivity(activity(`Created Invoice ${invoice.invoiceNumber}`, 'invoice'));
+    addActivity(activity(`Created ${invoice.invoiceNumber} for ${client.name || 'client'}`, 'invoice'));
     touch('Invoice created');
+    showToast(`Created ${invoice.invoiceNumber}`);
+    openInvoice(invoice);
   }
 
   function duplicateInvoiceForClient(invoice: Invoice) {
     const client = workspace.clients.find((item) => item.id === invoice.clientId);
     const defaults = clientDefaults(client, workspace);
-    const copy = duplicateInvoice(invoice, workspace.invoices, defaults.paymentTermsDays);
+    const copy = duplicateInvoice(invoice, takeInvoiceNumber(), defaults.paymentTermsDays);
     workspace.invoices = [copy, ...workspace.invoices];
-    addActivity(activity(`Duplicated Invoice ${invoice.invoiceNumber}`, 'invoice'));
+    addActivity(activity(`Duplicated ${invoice.invoiceNumber} as ${copy.invoiceNumber}`, 'invoice'));
     touch('Invoice duplicated');
-    showToast('Invoice duplicated');
+    showToast(`Duplicated as ${copy.invoiceNumber}`);
+    openInvoice(copy);
   }
 
   function generatePeriodPdf(period: BillingPeriod) {
@@ -527,13 +556,51 @@
     showToast('Invoice PDF generated');
   }
 
+  function ensureSnapshot(invoice: Invoice) {
+    if (!invoice.snapshot) invoice.snapshot = buildInvoiceSnapshot(workspace, invoice);
+  }
+
+  function markInvoiceSent(invoice: Invoice) {
+    invoice.status = 'sent';
+    invoice.sentDate = invoice.sentDate || todayIso();
+    ensureSnapshot(invoice);
+    const period = workspace.billingPeriods.find((item) => item.invoiceId === invoice.id);
+    if (period) period.status = 'invoiced';
+    addActivity(activity(`Sent ${invoice.invoiceNumber}`, 'invoice', period?.id));
+    touch('Invoice marked sent');
+    showToast(`${invoice.invoiceNumber} marked sent`);
+  }
+
   function markInvoicePaid(invoice: Invoice) {
     invoice.status = 'paid';
+    invoice.paidDate = invoice.paidDate || todayIso();
+    invoice.amountPaid = invoiceTotal(invoice);
+    ensureSnapshot(invoice);
     const period = workspace.billingPeriods.find((item) => item.invoiceId === invoice.id);
     if (period) period.status = 'paid';
-    addActivity(activity(`Marked Invoice ${invoice.invoiceNumber} paid`, 'payment', period?.id));
+    addActivity(activity(`Marked ${invoice.invoiceNumber} paid`, 'payment', period?.id));
     touch('Invoice marked paid');
-    showToast('Invoice marked paid');
+    showToast(`${invoice.invoiceNumber} marked paid`);
+  }
+
+  function reopenInvoice(invoice: Invoice) {
+    invoice.status = 'draft';
+    invoice.paidDate = '';
+    invoice.sentDate = '';
+    invoice.amountPaid = 0;
+    const period = workspace.billingPeriods.find((item) => item.invoiceId === invoice.id);
+    if (period) period.status = 'invoiced';
+    addActivity(activity(`Reopened ${invoice.invoiceNumber}`, 'updated', period?.id));
+    touch('Invoice reopened');
+    showToast(`${invoice.invoiceNumber} reopened`);
+  }
+
+  function setInvoiceStatus(invoice: Invoice, status: string) {
+    if (status === 'sent') return markInvoiceSent(invoice);
+    if (status === 'paid') return markInvoicePaid(invoice);
+    if (status === 'draft') return reopenInvoice(invoice);
+    invoice.status = status as Invoice['status'];
+    touch('Invoice updated');
   }
 
   function archiveInvoiceForClient(invoice: Invoice, archived = true) {
@@ -636,7 +703,7 @@
   }
 
   function invoiceItemAmount(item: InvoiceItem, invoice = selectedInvoice) {
-    return formatMoney(Number(item.quantity || 0) * Number(item.unitPrice || 0), invoice?.currency || workspace.settings.currency);
+    return formatMoney(lineTotal(item), invoice?.currency || workspace.settings.currency);
   }
 
   function replaceInvoiceItems(invoiceId: string, items: InvoiceItem[]) {
@@ -818,6 +885,13 @@
     switchView('clients');
   }
 
+  function archiveClient(client: Client, archived: boolean) {
+    client.archived = archived;
+    addActivity(activity(`${archived ? 'Archived' : 'Restored'} ${client.name || 'client'}`, 'archive'));
+    touch(archived ? 'Client archived' : 'Client restored');
+    showToast(archived ? 'Client archived' : 'Client restored');
+  }
+
   function deleteClient(client: Client) {
     if (!confirm(`Delete ${client.name || 'this client'}? Timesheets and invoices keep their client id.`)) return;
     replaceWorkspace({ ...workspace, clients: workspace.clients.filter((item) => item.id !== client.id) }, 'Client deleted');
@@ -856,6 +930,23 @@
     workspace.settings.companyLogo = await fileToDataUrl(file);
     input.value = '';
     touch('Company logo saved');
+  }
+
+  function removeLogo() {
+    workspace.settings.companyLogo = '';
+    touch('Company logo removed');
+  }
+
+  async function loadSampleData() {
+    if (!confirm('Load sample data? This replaces the current workspace in this browser.')) return;
+    const { demoWorkspace } = await import('$lib/demoWorkspace');
+    workspace = demoWorkspace();
+    selectedClientId = workspace.clients[0]?.id ?? '';
+    selectedPeriodId = clientPeriods(selectedClientId)[0]?.id ?? '';
+    addActivity(activity('Loaded sample data', 'import'));
+    switchView('dashboard');
+    touch('Sample data loaded');
+    showToast('Sample data loaded');
   }
 
   function fileToDataUrl(file: File) {
@@ -902,25 +993,26 @@
     return [...clientResults, ...timesheetResults, ...invoiceResults].slice(0, 8);
   }
 
-  function filteredPeriods(clientId: string) {
-    const needle = timesheetSearch.trim().toLowerCase();
+  function filteredPeriods(clientId: string, search: string, filter: string, sort: SortOrder) {
+    const needle = search.trim().toLowerCase();
     return clientPeriods(clientId)
-      .filter((period) => timesheetFilter === 'archived' || !period.archived)
+      .filter((period) => period.timesheetId)
+      .filter((period) => filter === 'archived' || !period.archived)
       .filter((period) => `${periodTitle(period)} ${period.notes}`.toLowerCase().includes(needle))
-      .sort((a, b) => (timesheetSort === 'newest' ? b.year - a.year || b.month - a.month : a.year - b.year || a.month - b.month));
+      .sort((a, b) => (sort === 'newest' ? b.year - a.year || b.month - a.month : a.year - b.year || a.month - b.month));
   }
 
-  function filteredInvoices(clientId: string) {
-    const needle = invoiceSearch.trim().toLowerCase();
+  function filteredInvoices(clientId: string, search: string, filter: string, sort: SortOrder) {
+    const needle = search.trim().toLowerCase();
     return clientInvoices(clientId)
       .filter((invoice) => {
-        if (invoiceFilter === 'archived') return invoice.archived;
-        if (invoiceFilter === 'unpaid') return !invoice.archived && invoice.status !== 'paid' && invoice.status !== 'void';
-        if (invoiceFilter === 'paid') return !invoice.archived && invoice.status === 'paid';
+        if (filter === 'archived') return invoice.archived;
+        if (filter === 'unpaid') return !invoice.archived && invoice.status !== 'paid' && invoice.status !== 'void';
+        if (filter === 'paid') return !invoice.archived && invoice.status === 'paid';
         return !invoice.archived;
       })
       .filter((invoice) => `${invoice.invoiceNumber} ${invoice.status} ${invoice.notes}`.toLowerCase().includes(needle))
-      .sort((a, b) => (invoiceSort === 'newest' ? b.issueDate.localeCompare(a.issueDate) : a.issueDate.localeCompare(b.issueDate)));
+      .sort((a, b) => (sort === 'newest' ? b.issueDate.localeCompare(a.issueDate) : a.issueDate.localeCompare(b.issueDate)));
   }
 
   function openSearchResult(result: { type: string; id: string }) {
@@ -964,9 +1056,14 @@
           <span>Clients</span>
         </button>
         <div class="client-nav">
-          {#each workspace.clients as client}
+          {#each activeClients as client}
             <button class:active={(activeView === 'clients' || activeView === 'timesheetDetail' || activeView === 'invoiceDetail') && selectedClientId === client.id} onclick={() => openClient(client.id)}>
               <span>{client.name || 'Untitled client'}</span>
+            </button>
+          {/each}
+          {#each archivedClients as client}
+            <button class="archived-nav" class:active={selectedClientId === client.id} onclick={() => openClient(client.id)}>
+              <span>{client.name || 'Untitled client'} · archived</span>
             </button>
           {/each}
         </div>
@@ -1052,9 +1149,37 @@
         <div class="metric"><span>Hours this month</span><strong>{formatHours(hoursThisMonth)}</strong></div>
         <div class="metric"><span>Hours this year</span><strong>{formatHours(hoursThisYear)}</strong></div>
       </section>
-      {#if workspace.clients.length}
+      {#if attentionCount}
+        <section class="list-panel attention-panel">
+          <div class="section-title"><h2>Needs attention</h2><span class="count-pill">{attentionCount}</span></div>
+          <div class="attention-list">
+            {#each overdueInvoices as invoice}
+              <button class="attention-item" onclick={() => openInvoice(invoice)}>
+                <span class="badge status-overdue">Overdue</span>
+                <span class="attention-main"><strong>{invoice.invoiceNumber}</strong><small>{clientName(workspace.clients, invoice.clientId)} · due {entryDateLabel(invoice.dueDate)}</small></span>
+                <span class="attention-value">{formatMoney(invoiceTotal(invoice), invoice.currency)}</span>
+              </button>
+            {/each}
+            {#each uninvoicedPeriods as period}
+              <button class="attention-item" onclick={() => openPeriod(period)}>
+                <span class="badge status-draft">Uninvoiced</span>
+                <span class="attention-main"><strong>{clientName(workspace.clients, period.clientId)}</strong><small>{periodTitle(period)} · {formatHours(periodHours(period))}</small></span>
+                <span class="attention-value">{formatMoney(periodValue(period), periodCurrency(period))}</span>
+              </button>
+            {/each}
+            {#each draftInvoices as invoice}
+              <button class="attention-item" onclick={() => openInvoice(invoice)}>
+                <span class="badge status-draft">Draft</span>
+                <span class="attention-main"><strong>{invoice.invoiceNumber}</strong><small>{clientName(workspace.clients, invoice.clientId)}</small></span>
+                <span class="attention-value">{formatMoney(invoiceTotal(invoice), invoice.currency)}</span>
+              </button>
+            {/each}
+          </div>
+        </section>
+      {/if}
+      {#if activeClients.length}
         <section class="period-grid">
-          {#each workspace.clients as client}
+          {#each activeClients as client}
             <article class="period-card client-overview">
               <div>
                 <h3>{client.name || 'Untitled client'}</h3>
@@ -1119,7 +1244,7 @@
                   </div>
                 </div>
                 <div class="mini-card-list">
-                  {#each selectedClientPeriods.filter((period) => !period.archived).slice(0, 3) as period}
+                  {#each selectedClientPeriods.filter((period) => !period.archived && period.timesheetId).slice(0, 3) as period}
                     <article class="mini-card">
                       <div>
                         <h3>{periodTitle(period)}</h3>
@@ -1131,6 +1256,8 @@
                         <button class="secondary" onclick={() => generateInvoiceForPeriod(period)}><ReceiptText size={16} /> Invoice</button>
                       </div>
                     </article>
+                  {:else}
+                    <p class="mini-empty">No timesheets yet. Create one to start logging hours.</p>
                   {/each}
                 </div>
               </div>
@@ -1147,13 +1274,15 @@
                     <article class="mini-card">
                       <div>
                         <h3>{invoice.invoiceNumber}</h3>
-                        <small>{formatMoney(invoiceTotal(invoice), invoice.currency)} · {invoice.status}</small>
+                        <small>{formatMoney(invoiceTotal(invoice), invoice.currency)} · {statusLabel(effectiveStatus(invoice))}</small>
                       </div>
                       <div class="actions">
                         <button onclick={() => openInvoice(invoice)}>Open</button>
                         <button class="secondary" onclick={() => generateInvoicePdfOnly(invoice)}><Download size={16} /> PDF</button>
                       </div>
                     </article>
+                  {:else}
+                    <p class="mini-empty">No invoices yet. Generate one from a timesheet or add a manual invoice.</p>
                   {/each}
                 </div>
               </div>
@@ -1174,7 +1303,10 @@
             <section class="tab-panel">
               <div class="section-title">
                 <h2>Timesheets</h2>
-                <button class="secondary" onclick={() => createNextTimesheet(selectedClient)}><Copy size={16} /> Create Next Timesheet</button>
+                <div class="actions">
+                  <button onclick={() => createTimesheetForClient(selectedClient)}><Plus size={16} /> New Timesheet</button>
+                  <button class="secondary" onclick={() => createNextTimesheet(selectedClient)}><Copy size={16} /> Next Month</button>
+                </div>
               </div>
               <div class="list-tools">
                 <input bind:value={timesheetSearch} placeholder="Search timesheets" />
@@ -1192,7 +1324,14 @@
                   <article class="period-card">
                     <div>
                       <h3>{periodTitle(period)}</h3>
-                      <small>{periodInvoice(period)?.status ?? 'No invoice'}{period.archived ? ' · Archived' : ''}</small>
+                      <small class="badge-row">
+                        {#if periodInvoice(period)}
+                          <span class="badge status-{effectiveStatus(periodInvoice(period)!)}">{statusLabel(effectiveStatus(periodInvoice(period)!))}</span>
+                        {:else}
+                          <span class="badge muted-badge">Not invoiced</span>
+                        {/if}
+                        {#if period.archived}<span class="badge muted-badge">Archived</span>{/if}
+                      </small>
                     </div>
                     <div class="period-metrics">
                       <strong>{formatHours(periodHours(period))}</strong>
@@ -1201,10 +1340,16 @@
                     <div class="actions">
                       <button onclick={() => openPeriod(period)}>Open</button>
                       <button class="secondary" onclick={() => duplicateTimesheetPeriod(period)}><Copy size={16} /> Duplicate</button>
-                      <button class="secondary" onclick={() => generateInvoiceForPeriod(period)}><ReceiptText size={16} /> Invoice</button>
-                      <button class="secondary" onclick={() => archivePeriod(period)}><Archive size={16} /> Archive</button>
+                      {#if periodInvoice(period)}
+                        <button class="secondary" onclick={() => openInvoice(periodInvoice(period)!)}><ReceiptText size={16} /> Invoice</button>
+                      {:else}
+                        <button class="secondary" onclick={() => generateInvoiceForPeriod(period)}><ReceiptText size={16} /> Invoice</button>
+                      {/if}
+                      <button class="secondary" onclick={() => archivePeriod(period, !period.archived)}><Archive size={16} /> {period.archived ? 'Restore' : 'Archive'}</button>
                     </div>
                   </article>
+                {:else}
+                  <p class="mini-empty">No timesheets match. Create one to start logging hours.</p>
                 {/each}
               </div>
             </section>
@@ -1229,20 +1374,28 @@
                   <article class="period-card invoice-card">
                     <div>
                       <h3>{invoice.invoiceNumber}</h3>
-                      <small>{invoice.status}{invoice.archived ? ' · Archived' : ''}</small>
+                      <small class="badge-row">
+                        <span class="badge status-{effectiveStatus(invoice)}">{statusLabel(effectiveStatus(invoice))}</span>
+                        {#if invoice.archived}<span class="badge muted-badge">Archived</span>{/if}
+                      </small>
                     </div>
                     <div class="period-metrics">
                       <strong>{formatMoney(invoiceTotal(invoice), invoice.currency)}</strong>
-                      <span>Due {invoice.dueDate}</span>
+                      <span>Due {entryDateLabel(invoice.dueDate)}</span>
                     </div>
                     <div class="actions">
                       <button onclick={() => openInvoice(invoice)}>Open</button>
                       <button class="secondary" onclick={() => generateInvoicePdfOnly(invoice)}><Download size={16} /> PDF</button>
-                      <button class="secondary" onclick={() => duplicateInvoiceForClient(invoice)}><Copy size={16} /> Duplicate</button>
-                      <button class="secondary" onclick={() => markInvoicePaid(invoice)}><CheckCircle2 size={16} /> Paid</button>
-                      <button class="secondary" onclick={() => archiveInvoiceForClient(invoice)}><Archive size={16} /> Archive</button>
+                      {#if invoice.status === 'draft'}
+                        <button class="secondary" onclick={() => markInvoiceSent(invoice)}><Send size={16} /> Sent</button>
+                      {:else if invoice.status !== 'paid'}
+                        <button class="secondary" onclick={() => markInvoicePaid(invoice)}><CheckCircle2 size={16} /> Paid</button>
+                      {/if}
+                      <button class="secondary" onclick={() => archiveInvoiceForClient(invoice, !invoice.archived)}><Archive size={16} /> {invoice.archived ? 'Restore' : 'Archive'}</button>
                     </div>
                   </article>
+                {:else}
+                  <p class="mini-empty">No invoices match. Generate one from a timesheet or add a manual invoice.</p>
                 {/each}
               </div>
             </section>
@@ -1264,7 +1417,8 @@
                 <label>Phone <input bind:value={selectedClient.phone} /></label>
                 <label>Hourly Rate <input type="number" min="0" step="0.01" bind:value={selectedClient.defaultHourlyRate} /></label>
                 <label>Currency <input bind:value={selectedClient.defaultCurrency} /></label>
-                <label>Payment Terms <input type="number" min="0" bind:value={selectedClient.defaultPaymentTermsDays} /></label>
+                <label>Payment Terms (days) <input type="number" min="0" bind:value={selectedClient.defaultPaymentTermsDays} /></label>
+                <label>Default Tax / VAT % <input type="number" min="0" max="100" step="0.1" bind:value={selectedClient.defaultTaxRate} /></label>
                 <label>Invoice Template
                   <select bind:value={selectedClient.defaultInvoiceTemplate}>
                     <option value="">Use workspace default ({templateLabel(workspace.settings.invoiceTemplate)})</option>
@@ -1277,6 +1431,9 @@
                 <label class="wide">Address <textarea rows="4" bind:value={selectedClient.address}></textarea></label>
               </div>
               <div class="actions danger-zone">
+                <button class="secondary" onclick={() => archiveClient(selectedClient, !selectedClient.archived)}>
+                  <Archive size={16} /> {selectedClient.archived ? 'Restore Client' : 'Archive Client'}
+                </button>
                 <button class="danger" onclick={() => deleteClient(selectedClient)}><Trash2 size={16} /> Delete Client</button>
               </div>
             </section>
@@ -1327,17 +1484,29 @@
             <div class="detail-card">
               <div>
                 <button class="context-link" onclick={() => backToClientTab(selectedClient, 'timesheets')}>← Back</button>
-                <small>{periodInvoice(selectedPeriod)?.status ?? 'No invoice'}{selectedPeriod.archived ? ' · Archived' : ''}</small>
-                <h2>{periodTitle(selectedPeriod)}</h2>
+                <div class="record-title-row">
+                  <h2>{selectedTimesheet.title || periodTitle(selectedPeriod)}</h2>
+                  {#if periodInvoice(selectedPeriod)}
+                    <button class="badge status-{effectiveStatus(periodInvoice(selectedPeriod)!)}" onclick={() => openInvoice(periodInvoice(selectedPeriod)!)}>{statusLabel(effectiveStatus(periodInvoice(selectedPeriod)!))}</button>
+                  {:else}
+                    <span class="badge muted-badge">Not invoiced</span>
+                  {/if}
+                  {#if selectedPeriod.archived}<span class="badge muted-badge">Archived</span>{/if}
+                </div>
                 <div class="record-meta">
+                  <span>{periodTitle(selectedPeriod)}</span>
                   <span>{formatHours(periodHours(selectedPeriod))}</span>
                   <span>{formatMoney(periodValue(selectedPeriod), periodCurrency(selectedPeriod))}</span>
                   <span>{selectedTimesheet.currency} · {formatMoney(selectedTimesheet.hourlyRate, selectedTimesheet.currency)}/h</span>
                 </div>
               </div>
               <div class="actions">
-                <button class="secondary" onclick={() => generatePeriodPdf(selectedPeriod)}><Download size={16} /> PDF</button>
-                <button onclick={() => generateInvoiceForPeriod(selectedPeriod)}><ReceiptText size={16} /> Generate Invoice</button>
+                <button class="secondary" onclick={() => generatePeriodPdf(selectedPeriod)}><Download size={16} /> Timesheet PDF</button>
+                {#if periodInvoice(selectedPeriod)}
+                  <button onclick={() => openInvoice(periodInvoice(selectedPeriod)!)}><ReceiptText size={16} /> Open Invoice</button>
+                {:else}
+                  <button onclick={() => generateInvoiceForPeriod(selectedPeriod)}><ReceiptText size={16} /> Generate Invoice</button>
+                {/if}
                 <div class="more-menu-wrap" data-detail-more>
                   <button class="secondary more-button" aria-haspopup="menu" aria-expanded={openDetailMenu === 'timesheet'} aria-label="More timesheet actions" onclick={() => toggleDetailMenu('timesheet')}>
                     <MoreHorizontal size={16} /> More
@@ -1351,6 +1520,12 @@
                   {/if}
                 </div>
               </div>
+            </div>
+            <div class="section-title"><h2>Timesheet details</h2></div>
+            <div class="form-grid" oninput={() => touch('Timesheet saved')}>
+              <label class="wide">Title <input bind:value={selectedTimesheet.title} placeholder="e.g. Product engineering" /></label>
+              <label>Hourly rate <input type="number" min="0" step="0.01" bind:value={selectedTimesheet.hourlyRate} /></label>
+              <label>Currency <input bind:value={selectedTimesheet.currency} /></label>
             </div>
             <div class="section-title">
               <h2>Entries</h2>
@@ -1476,18 +1651,23 @@
             <div class="detail-card">
               <div>
                 <button class="context-link" onclick={() => backToClientTab(selectedClient, 'invoices')}>← Back</button>
-                <small>{selectedInvoice.status}{selectedInvoice.archived ? ' · Archived' : ''}</small>
-                <h2>{selectedInvoice.invoiceNumber}</h2>
+                <div class="record-title-row">
+                  <h2>{selectedInvoice.invoiceNumber || 'Untitled invoice'}</h2>
+                  <span class="badge status-{effectiveStatus(selectedInvoice)}">{statusLabel(effectiveStatus(selectedInvoice))}</span>
+                  {#if selectedInvoice.archived}<span class="badge muted-badge">Archived</span>{/if}
+                </div>
                 <div class="record-meta">
                   <span>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</span>
-                  <span>Due {selectedInvoice.dueDate}</span>
-                  <span>Issue {selectedInvoice.issueDate}</span>
-                  <span>Template: {templateLabel(selectedInvoice.template)}</span>
+                  <span>Issued {entryDateLabel(selectedInvoice.issueDate)}</span>
+                  <span>Due {entryDateLabel(selectedInvoice.dueDate)}</span>
+                  {#if selectedInvoice.paidDate}<span>Paid {entryDateLabel(selectedInvoice.paidDate)}</span>{/if}
                 </div>
               </div>
               <div class="actions">
-                <button class="secondary" onclick={() => generateInvoicePdfOnly(selectedInvoice)}><Download size={16} /> PDF</button>
-                {#if selectedInvoice.status !== 'paid'}
+                <button class="secondary" onclick={() => generateInvoicePdfOnly(selectedInvoice)}><Download size={16} /> Download PDF</button>
+                {#if selectedInvoice.status === 'draft'}
+                  <button onclick={() => markInvoiceSent(selectedInvoice)}><Send size={16} /> Mark Sent</button>
+                {:else if selectedInvoice.status !== 'paid'}
                   <button onclick={() => markInvoicePaid(selectedInvoice)}><CheckCircle2 size={16} /> Mark Paid</button>
                 {/if}
                 <div class="more-menu-wrap" data-detail-more>
@@ -1496,27 +1676,58 @@
                   </button>
                   {#if openDetailMenu === 'invoice'}
                     <div class="more-menu" role="menu">
+                      {#if selectedInvoice.status !== 'paid'}
+                        <button role="menuitem" onclick={() => { markInvoicePaid(selectedInvoice); closeDetailMenu(); }}><CheckCircle2 size={16} /> Mark Paid</button>
+                      {/if}
+                      {#if selectedInvoice.status !== 'draft'}
+                        <button role="menuitem" onclick={() => { reopenInvoice(selectedInvoice); closeDetailMenu(); }}><History size={16} /> Reopen as Draft</button>
+                      {/if}
                       <button role="menuitem" onclick={() => { duplicateInvoiceForClient(selectedInvoice); closeDetailMenu(); }}><Copy size={16} /> Duplicate</button>
-                      <button role="menuitem" onclick={() => { archiveInvoiceForClient(selectedInvoice); closeDetailMenu(); }}><Archive size={16} /> Archive</button>
+                      <button role="menuitem" onclick={() => { archiveInvoiceForClient(selectedInvoice, !selectedInvoice.archived); closeDetailMenu(); }}><Archive size={16} /> {selectedInvoice.archived ? 'Restore' : 'Archive'}</button>
                       <button class="danger-menu-item" role="menuitem" onclick={() => { deleteInvoiceForClient(selectedInvoice); closeDetailMenu(); }}><Trash2 size={16} /> Delete</button>
                     </div>
                   {/if}
                 </div>
               </div>
             </div>
-            <div class="section-title">
-              <h2>Invoice details</h2>
-              <strong>{formatMoney(invoiceTotal(selectedInvoice), selectedInvoice.currency)}</strong>
-            </div>
+
+            {#if selectedInvoice.timesheetId && workspace.timesheets.some((t) => t.id === selectedInvoice.timesheetId)}
+              <button class="source-link" onclick={() => openSourceTimesheet(selectedInvoice)}>
+                <FileText size={15} /> Generated from timesheet — open source
+              </button>
+            {/if}
+
+            <div class="section-title"><h2>Invoice details</h2></div>
             <div class="form-grid invoice-options" oninput={() => touch('Invoice saved')}>
-              <label>Invoice Template
+              <label>Invoice number <input bind:value={selectedInvoice.invoiceNumber} /></label>
+              <label>Status
+                <select value={selectedInvoice.status} onchange={(event) => setInvoiceStatus(selectedInvoice, eventValue(event))}>
+                  <option value="draft">Draft</option>
+                  <option value="sent">Sent</option>
+                  <option value="paid">Paid</option>
+                  <option value="void">Void</option>
+                </select>
+              </label>
+              <label>Issue date <input type="date" bind:value={selectedInvoice.issueDate} /></label>
+              <label>Due date <input type="date" bind:value={selectedInvoice.dueDate} /></label>
+              <label>Currency <input bind:value={selectedInvoice.currency} /></label>
+              <label>PO / reference <input bind:value={selectedInvoice.poReference} placeholder="Optional" /></label>
+              <label>Discount %
+                <input type="number" min="0" max="100" step="0.1" bind:value={selectedInvoice.discountPercent} />
+              </label>
+              <label>Tax / VAT %
+                <input type="number" min="0" max="100" step="0.1" bind:value={selectedInvoice.taxRate} />
+              </label>
+              <label>Template
                 <select bind:value={selectedInvoice.template}>
                   <option value="classic">Classic</option>
                   <option value="modern">Modern</option>
                   <option value="compact">Compact</option>
                 </select>
               </label>
+              <label class="wide">Notes <textarea rows="3" bind:value={selectedInvoice.notes} placeholder="Payment instructions, terms, thank-you note"></textarea></label>
             </div>
+
             <div class="section-title">
               <h2>Invoice items</h2>
               <button onclick={() => addInvoiceItem(selectedInvoice)}><Plus size={16} /> Add Item</button>
@@ -1582,43 +1793,94 @@
                 </aside>
               {/if}
             </div>
+
+            {#if invoiceBreakdown}
+              <div class="totals-panel">
+                <div class="totals-row"><span>Subtotal</span><span>{formatMoney(invoiceBreakdown.subtotal, selectedInvoice.currency)}</span></div>
+                {#if invoiceBreakdown.discount > 0}
+                  <div class="totals-row"><span>Discount ({invoiceBreakdown.discountRate}%)</span><span>−{formatMoney(invoiceBreakdown.discount, selectedInvoice.currency)}</span></div>
+                {/if}
+                {#if invoiceBreakdown.tax > 0}
+                  <div class="totals-row"><span>Tax / VAT ({invoiceBreakdown.taxRate}%)</span><span>{formatMoney(invoiceBreakdown.tax, selectedInvoice.currency)}</span></div>
+                {/if}
+                <div class="totals-row grand"><span>Total</span><span>{formatMoney(invoiceBreakdown.total, selectedInvoice.currency)}</span></div>
+                {#if invoiceBreakdown.amountPaid > 0 && invoiceBreakdown.amountDue > 0}
+                  <div class="totals-row"><span>Paid</span><span>{formatMoney(invoiceBreakdown.amountPaid, selectedInvoice.currency)}</span></div>
+                  <div class="totals-row due"><span>Amount due</span><span>{formatMoney(invoiceBreakdown.amountDue, selectedInvoice.currency)}</span></div>
+                {:else if selectedInvoice.status !== 'paid'}
+                  <div class="totals-row due"><span>Amount due</span><span>{formatMoney(invoiceBreakdown.amountDue, selectedInvoice.currency)}</span></div>
+                {/if}
+              </div>
+            {/if}
           </section>
         </section>
       {:else}
         <div class="empty-state">Invoice not found.</div>
       {/if}
     {:else if activeView === 'settings'}
-      <section class="editor full">
-        <div class="editor-head"><h2>Workspace Settings</h2></div>
-        <div class="form-grid" oninput={() => touch('Settings saved')}>
-          <label>Company name <input bind:value={workspace.profile.companyName} /></label>
-          <label>Contact name <input bind:value={workspace.profile.contactName} /></label>
-          <label>Email <input type="email" bind:value={workspace.profile.email} /></label>
-          <label>Phone <input bind:value={workspace.profile.phone} /></label>
-          <label>Company number <input bind:value={workspace.profile.companyNumber} /></label>
-          <label>VAT number <input bind:value={workspace.profile.vatNumber} /></label>
-          <label class="wide">Address <textarea rows="4" bind:value={workspace.profile.address}></textarea></label>
-          <label>Bank name <input bind:value={workspace.profile.bankName} /></label>
-          <label>Account name <input bind:value={workspace.profile.accountName} /></label>
-          <label>Sort code <input bind:value={workspace.profile.sortCode} /></label>
-          <label>Account number <input bind:value={workspace.profile.accountNumber} /></label>
-          <label>IBAN <input bind:value={workspace.profile.iban} /></label>
-          <label>Default currency <input bind:value={workspace.settings.currency} /></label>
-          <label>Workspace Default Template
-            <select bind:value={workspace.settings.invoiceTemplate}>
-              <option value="classic">Classic</option>
-              <option value="modern">Modern</option>
-              <option value="compact">Compact</option>
-            </select>
-          </label>
+      <section class="editor full settings-page">
+        <div class="settings-block">
+          <h3>Business details</h3>
+          <p class="settings-help">These details appear as the supplier on every invoice and timesheet.</p>
+          <div class="form-grid" oninput={() => touch('Settings saved')}>
+            <label>Company name <input bind:value={workspace.profile.companyName} /></label>
+            <label>Contact name <input bind:value={workspace.profile.contactName} /></label>
+            <label>Email <input type="email" bind:value={workspace.profile.email} /></label>
+            <label>Phone <input bind:value={workspace.profile.phone} /></label>
+            <label>Company number <input bind:value={workspace.profile.companyNumber} /></label>
+            <label>VAT number <input bind:value={workspace.profile.vatNumber} /></label>
+            <label class="wide">Address <textarea rows="4" bind:value={workspace.profile.address}></textarea></label>
+          </div>
         </div>
+
+        <div class="settings-block">
+          <h3>Bank &amp; payment</h3>
+          <p class="settings-help">Shown in the payment section of every invoice.</p>
+          <div class="form-grid" oninput={() => touch('Settings saved')}>
+            <label>Bank name <input bind:value={workspace.profile.bankName} /></label>
+            <label>Account name <input bind:value={workspace.profile.accountName} /></label>
+            <label>Sort code <input bind:value={workspace.profile.sortCode} /></label>
+            <label>Account number <input bind:value={workspace.profile.accountNumber} /></label>
+            <label>IBAN <input bind:value={workspace.profile.iban} /></label>
+          </div>
+        </div>
+
+        <div class="settings-block">
+          <h3>Invoicing defaults</h3>
+          <p class="settings-help">Defaults applied to new invoices. Each client and invoice can override them.</p>
+          <div class="form-grid" oninput={() => touch('Settings saved')}>
+            <label>Default currency <input bind:value={workspace.settings.currency} /></label>
+            <label>Default payment terms (days) <input type="number" min="0" bind:value={workspace.profile.paymentTermsDays} /></label>
+            <label>Default tax / VAT % <input type="number" min="0" max="100" step="0.1" bind:value={workspace.settings.defaultTaxRate} /></label>
+            <label>Default template
+              <select bind:value={workspace.settings.invoiceTemplate}>
+                <option value="classic">Classic</option>
+                <option value="modern">Modern</option>
+                <option value="compact">Compact</option>
+              </select>
+            </label>
+            <label>Invoice number prefix <input bind:value={workspace.settings.invoicePrefix} maxlength="12" /></label>
+            <label>Next invoice number <input type="number" min="1" bind:value={workspace.settings.nextInvoiceNumber} /></label>
+          </div>
+          <p class="settings-help">Next invoice will be numbered <strong>{nextInvoiceNumber(workspace).invoiceNumber}</strong>.</p>
+        </div>
+
         <div class="settings-block">
           <h3>Company logo</h3>
           <div class="logo-tools">
             {#if workspace.settings.companyLogo}<img src={workspace.settings.companyLogo} alt="Company logo preview" />{/if}
             <input bind:this={logoInput} class="file-input" type="file" accept="image/png,image/jpeg,image/svg+xml" onchange={uploadLogo} />
-            <button class="secondary" onclick={() => logoInput.click()}><Upload size={16} /> Upload Company Logo</button>
+            <button class="secondary" onclick={() => logoInput.click()}><Upload size={16} /> Upload logo</button>
+            {#if workspace.settings.companyLogo}
+              <button class="secondary" onclick={removeLogo}><Trash2 size={16} /> Remove</button>
+            {/if}
           </div>
+        </div>
+
+        <div class="settings-block">
+          <h3>Sample data</h3>
+          <p class="settings-help">Load a demo workspace with example clients and invoices to explore the app. This replaces your current data.</p>
+          <button class="secondary" onclick={loadSampleData}><Upload size={16} /> Load sample data</button>
         </div>
       </section>
     {/if}

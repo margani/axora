@@ -1188,8 +1188,32 @@ button.context-link:hover {
   gap: 5px;
 }
 
+.settings-page {
+  display: grid;
+  gap: 8px;
+  max-width: 900px;
+}
+
 .settings-block {
-  margin-top: 22px;
+  margin-top: 8px;
+  padding: 20px 22px;
+  border-radius: 14px;
+  background: #fffdf9;
+  border: 1px solid #e8e0d1;
+}
+
+.settings-block h3 {
+  font-size: 1.02rem;
+}
+
+.settings-help {
+  margin: 4px 0 14px;
+  color: #6b6f6a;
+  font-size: 0.9rem;
+}
+
+.settings-block:last-child .settings-help {
+  margin-bottom: 12px;
 }
 
 .logo-tools {
@@ -1376,15 +1400,29 @@ button.context-link:hover {
   }
 
   nav {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    display: flex;
+    gap: 8px;
   }
 
-  nav button {
+  .nav-group {
+    flex: 1;
+    display: flex;
+  }
+
+  nav > button,
+  .nav-group > button {
+    flex: 1;
     justify-content: center;
     padding: 0 8px;
   }
 
-  nav button span {
+  /* The per-client list is reachable from the Clients page on small screens. */
+  .client-nav {
+    display: none;
+  }
+
+  nav > button span,
+  .nav-group > button span {
     display: none;
   }
 
@@ -1461,4 +1499,211 @@ button.context-link:hover {
   .wizard-steps {
     grid-template-columns: 1fr;
   }
+}
+
+/* Status badges, invoice totals and source links (added in the invoice milestone) */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+  background: #ece4d6;
+  color: #4a4336;
+}
+
+.badge::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.85;
+}
+
+.badge.muted-badge::before {
+  display: none;
+}
+
+.badge.status-draft {
+  background: #ece7dd;
+  color: #6b6355;
+}
+
+.badge.status-sent {
+  background: #dfe9f3;
+  color: #2c5480;
+}
+
+.badge.status-paid {
+  background: #dcece0;
+  color: #256143;
+}
+
+.badge.status-overdue {
+  background: #f6e2dd;
+  color: #9a3a2c;
+}
+
+.badge.status-void {
+  background: #e8e6e4;
+  color: #6b6b6b;
+}
+
+.badge.muted-badge {
+  background: #e8e6e4;
+  color: #6b6b6b;
+}
+
+.badge-row {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.record-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.source-link {
+  align-self: flex-start;
+  min-height: 32px;
+  background: transparent;
+  color: #1f6f68;
+  padding: 0;
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.source-link:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+
+.totals-panel {
+  margin-left: auto;
+  width: min(340px, 100%);
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #f6f2ea;
+  border: 1px solid #e6ddcd;
+}
+
+.totals-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 0.92rem;
+  color: #4a4b46;
+}
+
+.totals-row span:last-child {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  color: #1d2525;
+}
+
+.totals-row.grand {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid #e2d8c7;
+  font-size: 1.05rem;
+}
+
+.totals-row.grand span {
+  font-weight: 800;
+  color: #17201f;
+}
+
+.totals-row.due span:last-child {
+  color: #9a3a2c;
+}
+
+/* Dashboard "Needs attention" list */
+.attention-panel {
+  margin-bottom: 4px;
+}
+
+.count-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #f0e0d9;
+  color: #9a3a2c;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.attention-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.attention-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 54px;
+  padding: 10px 14px;
+  background: #fffdf9;
+  border: 1px solid #ece4d6;
+  border-radius: 10px;
+  color: inherit;
+  text-align: left;
+}
+
+.attention-item:hover {
+  background: #f7f2e9;
+  border-color: #ddd2bf;
+}
+
+.attention-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.attention-main strong {
+  font-size: 0.95rem;
+}
+
+.attention-main small {
+  color: #6b6f6a;
+}
+
+.attention-value {
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Archived client nav item and empty-list hints */
+.client-nav button.archived-nav {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.mini-empty {
+  padding: 18px;
+  color: #6b6f6a;
+  font-size: 0.92rem;
+  background: #f7f3ea;
+  border: 1px dashed #ddd2bf;
+  border-radius: 10px;
 }

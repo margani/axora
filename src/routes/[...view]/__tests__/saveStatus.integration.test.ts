@@ -1,11 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { demoWorkspace } from '$lib/demoWorkspace';
 import { SAVED_AT_KEY, STORAGE_KEY } from '$lib/workspace';
 import Page from '../+page.svelte';
+import { sampleWorkspace } from './fixture';
 
 function seedWorkspace(savedAt = '2026-07-07T14:32:00.000Z') {
-  const workspace = { ...demoWorkspace(), lastSavedAt: savedAt };
+  const workspace = { ...sampleWorkspace(), lastSavedAt: savedAt };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
   localStorage.removeItem(SAVED_AT_KEY);
   return workspace;
