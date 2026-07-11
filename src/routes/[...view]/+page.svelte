@@ -114,7 +114,9 @@
   let toastTimer: ReturnType<typeof setTimeout>;
   let fileInput: HTMLInputElement;
   let logoInput: HTMLInputElement;
+  let searchInput: HTMLInputElement | undefined;
   let theme: Theme = 'light';
+  const shortcutKey = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl ';
   let paymentModalOpen = false;
   let paymentAmount = 0;
 
@@ -206,7 +208,12 @@
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') openDetailMenu = '';
       if (event.key === 'Escape') clearConfirmOpen = false;
+      if (event.key === 'Escape') paymentModalOpen = false;
       if (event.key === 'Escape' && entryDraft) closeEntryEditor();
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        searchInput?.focus();
+      }
     };
     const onDocumentClick = (event: MouseEvent) => {
       if (event.target instanceof Element && event.target.closest('[data-detail-more]')) return;
@@ -1148,7 +1155,8 @@
       <div class="top-actions">
         <div class="search-box">
           <Search size={16} />
-          <input bind:value={searchQuery} placeholder="Search clients, timesheets, invoices, notes" />
+          <input bind:this={searchInput} bind:value={searchQuery} placeholder="Search clients, timesheets, invoices…" />
+          <kbd class="search-kbd">{shortcutKey}K</kbd>
           {#if searchResults.length}
             <div class="search-results">
               {#each searchResults as result}
