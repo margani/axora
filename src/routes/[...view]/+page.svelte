@@ -11,13 +11,18 @@
     LayoutDashboard,
     MoreHorizontal,
     Plus,
+    Monitor,
+    Moon,
     ReceiptText,
     Search,
     Send,
     Settings,
+    Sun,
     Trash2,
     Upload
   } from '@lucide/svelte';
+  import { loadTheme, nextTheme, saveTheme, themeLabel, type Theme } from '$lib/theme';
+  import InvoicePreview from '$lib/InvoicePreview.svelte';
   import type { ActivityEvent, BillingPeriod, Client, Invoice, InvoiceItem, TimesheetEntry, Workspace } from '$lib/types';
   import { generateInvoicePdf, generateTimesheetPdf } from '$lib/pdf';
   import {
@@ -109,6 +114,14 @@
   let toastTimer: ReturnType<typeof setTimeout>;
   let fileInput: HTMLInputElement;
   let logoInput: HTMLInputElement;
+  let theme: Theme = 'light';
+  let paymentModalOpen = false;
+  let paymentAmount = 0;
+
+  function cycleTheme() {
+    theme = nextTheme(theme);
+    saveTheme(theme);
+  }
 
   $: selectedClient = workspace.clients.find((client) => client.id === selectedClientId);
   $: selectedClientPeriods = selectedClient ? clientPeriods(selectedClient.id) : [];
@@ -211,6 +224,7 @@
   });
 
   async function initializeWorkspace() {
+    theme = loadTheme();
     const hasSavedData = hasSavedWorkspace();
     const loaded = loadWorkspace();
     workspace = loaded.workspace;
@@ -601,6 +615,33 @@
     if (status === 'draft') return reopenInvoice(invoice);
     invoice.status = status as Invoice['status'];
     touch('Invoice updated');
+  }
+
+  function openPaymentModal(invoice: Invoice) {
+    paymentAmount = invoiceTotals(invoice).amountDue;
+    paymentModalOpen = true;
+  }
+
+  function recordPayment(invoice: Invoice) {
+    const total = invoiceTotal(invoice);
+    const already = Number(invoice.amountPaid) || 0;
+    const paid = Math.min(total, Math.max(0, already + (Number(paymentAmount) || 0)));
+    invoice.amountPaid = paid;
+    ensureSnapshot(invoice);
+    const period = workspace.billingPeriods.find((item) => item.invoiceId === invoice.id);
+    if (paid >= total) {
+      invoice.status = 'paid';
+      invoice.paidDate = invoice.paidDate || todayIso();
+      if (period) period.status = 'paid';
+      addActivity(activity(`Recorded payment · ${invoice.invoiceNumber} paid in full`, 'payment', period?.id));
+      showToast(`${invoice.invoiceNumber} paid in full`);
+    } else {
+      if (invoice.status === 'draft') invoice.status = 'sent';
+      addActivity(activity(`Recorded ${formatMoney(Number(paymentAmount) || 0, invoice.currency)} on ${invoice.invoiceNumber}`, 'payment', period?.id));
+      showToast('Payment recorded');
+    }
+    paymentModalOpen = false;
+    touch('Payment recorded');
   }
 
   function archiveInvoiceForClient(invoice: Invoice, archived = true) {
@@ -1073,6 +1114,12 @@
         <span>Settings</span>
       </button>
     </nav>
+    <div class="sidebar-foot">
+      <button class="theme-toggle" onclick={cycleTheme} aria-label={`Theme: ${themeLabel(theme)}. Click to change.`}>
+        {#if theme === 'light'}<Sun size={17} />{:else if theme === 'dark'}<Moon size={17} />{:else}<Monitor size={17} />{/if}
+        <span>{themeLabel(theme)}</span>
+      </button>
+    </div>
   </aside>
 
   <main>
@@ -1136,6 +1183,22 @@
           <div class="actions end">
             <button class="secondary" onclick={() => (clearConfirmOpen = false)}>Cancel</button>
             <button class="danger" onclick={clearLocal}><Trash2 size={16} /> Clear data</button>
+          </div>
+        </div>
+      </div>
+    {/if}
+
+    {#if paymentModalOpen && selectedInvoice}
+      <div class="modal-backdrop">
+        <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="pay-title">
+          <h2 id="pay-title">Record a payment</h2>
+          <p>Record a payment against {selectedInvoice.invoiceNumber}. The invoice is marked paid automatically once the full amount is received.</p>
+          <label>Amount received
+            <input type="number" min="0" step="0.01" bind:value={paymentAmount} />
+          </label>
+          <div class="actions end">
+            <button class="secondary" onclick={() => (paymentModalOpen = false)}>Cancel</button>
+            <button class="accent" onclick={() => recordPayment(selectedInvoice)}><CheckCircle2 size={16} /> Record payment</button>
           </div>
         </div>
       </div>
@@ -1697,6 +1760,8 @@
               </button>
             {/if}
 
+            <div class="invoice-layout">
+            <div class="invoice-main">
             <div class="section-title"><h2>Invoice details</h2></div>
             <div class="form-grid invoice-options" oninput={() => touch('Invoice saved')}>
               <label>Invoice number <input bind:value={selectedInvoice.invoiceNumber} /></label>
@@ -1812,6 +1877,38 @@
                 {/if}
               </div>
             {/if}
+            </div><!-- /invoice-main -->
+
+            <aside class="invoice-rail">
+              {#if invoiceBreakdown}
+                <div class="rail-card">
+                  <span class="rail-k">{selectedInvoice.status === 'paid' ? 'Paid in full' : 'Amount due'}</span>
+                  <div class="rail-v" class:due={selectedInvoice.status !== 'paid' && invoiceBreakdown.amountDue > 0}>
+                    {formatMoney(selectedInvoice.status === 'paid' ? invoiceBreakdown.total : invoiceBreakdown.amountDue, selectedInvoice.currency)}
+                  </div>
+                  {#if selectedInvoice.status !== 'paid'}
+                    <div class="rail-sub">of {formatMoney(invoiceBreakdown.total, selectedInvoice.currency)} · due {entryDateLabel(selectedInvoice.dueDate)}</div>
+                    <div class="rail-actions">
+                      <button class="secondary" onclick={() => openPaymentModal(selectedInvoice)}>Record payment</button>
+                      <button class="accent" onclick={() => markInvoicePaid(selectedInvoice)}><CheckCircle2 size={15} /> Mark paid</button>
+                    </div>
+                  {:else}
+                    <div class="rail-sub">Paid {selectedInvoice.paidDate ? entryDateLabel(selectedInvoice.paidDate) : ''}</div>
+                    <div class="rail-actions">
+                      <button class="secondary" onclick={() => reopenInvoice(selectedInvoice)}><History size={15} /> Reopen</button>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+              <div class="rail-card preview-card">
+                <div class="rail-head"><b>Live preview</b><span>{templateLabel(selectedInvoice.template)}</span></div>
+                <div class="preview-scroll">
+                  <InvoicePreview {workspace} invoice={selectedInvoice} />
+                </div>
+                <button class="secondary preview-download" onclick={() => generateInvoicePdfOnly(selectedInvoice)}><Download size={15} /> Download PDF</button>
+              </div>
+            </aside>
+            </div><!-- /invoice-layout -->
           </section>
         </section>
       {:else}

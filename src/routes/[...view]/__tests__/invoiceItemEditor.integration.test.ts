@@ -40,7 +40,8 @@ describe('invoice item side editor', () => {
     await waitFor(() => {
       expect(screen.queryByText('Last saved: Not saved yet')).not.toBeInTheDocument();
       expect(screen.getByText('Saved ✓')).toBeInTheDocument();
-      expect(screen.getByText('Updated invoice services')).toBeInTheDocument();
+      // Appears in both the editable item row and the live preview.
+      expect(screen.getAllByText('Updated invoice services').length).toBeGreaterThan(0);
       expect(screen.getAllByText('£11,250.00').length).toBeGreaterThan(0);
     });
 
@@ -51,7 +52,7 @@ describe('invoice item side editor', () => {
     await fireEvent.click(screen.getByRole('button', { name: /Save changes/i }));
 
     await waitFor(() => {
-      expect(screen.getByText('Additional support')).toBeInTheDocument();
+      expect(screen.getAllByText('Additional support').length).toBeGreaterThan(0);
       expect(screen.getAllByText('£11,450.00').length).toBeGreaterThan(0);
     });
 
