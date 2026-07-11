@@ -29,8 +29,13 @@ The app stores data in the browser with `localStorage` and lets the user import/
 - **Reliable invoice numbering** — a persistent, configurable counter (prefix +
   year + sequence) that never reuses a number after a delete or collides after
   a duplicate.
+- **Live invoice preview** beside the editor that mirrors the PDF and updates as
+  you type, plus **partial-payment recording** that marks an invoice paid once
+  it is settled in full.
 - **Three PDF templates** — Classic, Modern, and Compact, kept close to the
   in-app preview.
+- **Light and dark themes** with a sidebar toggle (light / dark / follow the
+  system), built on a modern design-token system.
 - **Local-first** — autosave to `localStorage` with a trustworthy save-status
   indicator, portable `workspace.json` import/export, and a one-click "clear
   local data".
@@ -138,6 +143,9 @@ Deployment steps:
 - **`src/lib/money.ts`** — decimal-safe money and the single `invoiceTotals`
   engine used by the UI, the PDF, and the dashboard so figures never drift.
 - **`src/lib/pdf.ts`** — `jspdf` document builders for invoices and timesheets.
+- **`src/lib/InvoicePreview.svelte`** — the in-app live invoice preview.
+- **`src/lib/theme.ts`** — light/dark/system theme preference (persisted to
+  `localStorage`, applied via a `data-theme` attribute on the root element).
 - **`src/lib/demoWorkspace.ts`** — the sample/demo dataset.
 
 ### Data Model
